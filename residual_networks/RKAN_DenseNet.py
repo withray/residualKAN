@@ -4,10 +4,10 @@ import torch
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from KAN_Conv.KANLinear import KANLinear
 
-class DenseKNet(nn.Module):
+class RKAN_DenseNet(nn.Module):
     def __init__(self, num_classes = 100, version = "densenet121", kan_type = "chebyshev", pretrained = False, main_conv = "densenet", fcl = "densenet",
                  reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", pre_transition = False, mechanisms = [None, None, None, None]):
-        super(DenseKNet, self).__init__()
+        super(RKAN_DenseNet, self).__init__()
 
         self.used_parameters = set()
         self.printed_params = False

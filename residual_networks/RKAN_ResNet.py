@@ -4,10 +4,10 @@ import torch
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from KAN_Conv.KANLinear import KANLinear
 
-class ResKNet(nn.Module):
+class RKAN_ResNet(nn.Module):
     def __init__(self, num_classes = 100, version = "resnet18", kan_type = "chebyshev", pretrained = False, main_conv = "resnet", fcl = "resnet",
                  reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", single_conv = True, mechanisms = [None, None, None, None]):
-        super(ResKNet, self).__init__()
+        super(RKAN_ResNet, self).__init__()
 
         self.used_parameters = set()
         self.printed_params = False

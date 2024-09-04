@@ -4,10 +4,10 @@ import torch
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from KAN_Conv.KANLinear import KANLinear
 
-class MobileKNet(nn.Module):
+class RKAN_MobileNet(nn.Module):
     def __init__(self, num_classes = 100, version = "mobilenet_v3_large", kan_type = "chebyshev", pretrained = False, fcl = "mobilenet",
                  reduce_factor = 4, grid_size = 5, n_convs = 1, small_dataset = True, single_conv = True, mechanism = True):
-        super(MobileKNet, self).__init__()
+        super(RKAN_MobileNet, self).__init__()
 
         self.used_parameters = set()
         self.printed_params = False

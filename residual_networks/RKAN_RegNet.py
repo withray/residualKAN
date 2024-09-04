@@ -4,10 +4,10 @@ import torch
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from KAN_Conv.KANLinear import KANLinear
 
-class RegKNet(nn.Module):
+class RKAN_RegNet(nn.Module):
     def __init__(self, num_classes = 100, version = "regnet_y_400mf", kan_type = "chebyshev", pretrained = False, fcl = "regnet",
                  reduce_factor = 4, grid_size = 5, n_convs = 1, dataset_size = "small", single_conv = True, mechanisms = [None, None, None, None]):
-        super(RegKNet, self).__init__()
+        super(RKAN_RegNet, self).__init__()
 
         self.used_parameters = set()
         self.printed_params = False

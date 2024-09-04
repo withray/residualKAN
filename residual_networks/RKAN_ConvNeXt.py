@@ -4,10 +4,10 @@ import torch
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from KAN_Conv.KANLinear import KANLinear
 
-class ConvKNeXt(nn.Module):
+class RKAN_ConvNeXt(nn.Module):
     def __init__(self, num_classes = 100, version = "convnext_tiny", kan_type = "chebyshev", pretrained = False, fcl = "convnext",
                  reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, single_conv = True, mechanisms = [None, None, None, None]):
-        super(ConvKNeXt, self).__init__()
+        super(RKAN_ConvNeXt, self).__init__()
 
         self.used_parameters = set()
         self.printed_params = False
