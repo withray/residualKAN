@@ -24,7 +24,7 @@ class RKAN_ConvNeXt(nn.Module):
             raise ValueError(f"Length of mechanisms ({len(self.mechanisms)}) must match the number of stages (4).")
         
         if dataset_size == "small":
-            self.convnext.features[0][0] = nn.Conv2d(3, 96, kernel_size = 4, stride = 1, padding = 1)
+            self.convnext.features[0][0] = nn.Conv2d(3, 96, kernel_size = 1, stride = 1)
         elif dataset_size == "medium":
             self.convnext.features[0][0] = nn.Conv2d(3, 96, kernel_size = 4, stride = 2, padding = 1)
         elif dataset_size == "large":

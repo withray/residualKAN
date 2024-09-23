@@ -87,7 +87,7 @@ class RKAN_VGG(nn.Module):
     def _get_vgg_stages(self, vgg):
         features = list(vgg.features)
         maxpool_indices = [i for i, layer in enumerate(features) if isinstance(layer, nn.MaxPool2d)]
-        features[maxpool_indices[-1]] = nn.MaxPool2d(kernel_size = 2, ceil_mode = True)
+        # features[maxpool_indices[-1]] = nn.MaxPool2d(kernel_size = 2, ceil_mode = True)
         stem = nn.Sequential(*features[:maxpool_indices[0] + 1])
         stages = [nn.Sequential(*features[maxpool_indices[i] + 1:maxpool_indices[i + 1] + 1]) for i in range(len(maxpool_indices) - 1)]
         stage_indices = [maxpool_indices[0]+1] + [maxpool_indices[i]+1 for i in range(1, len(maxpool_indices))]
