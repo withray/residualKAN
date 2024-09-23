@@ -4,10 +4,10 @@ import torch
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from KAN_Conv.KANLinear import KANLinear
 
-class RKAN_ResNet(nn.Module):
-    def __init__(self, num_classes = 100, version = "resnet18", kan_type = "chebyshev", pretrained = False, main_conv = "resnet", fcl = "resnet", log_norms = False,
+class RKAN_WideResNet(nn.Module):
+    def __init__(self, num_classes = 100, version = "wide_resnet50_2", kan_type = "chebyshev", pretrained = False, main_conv = "wideresnet", fcl = "wideresnet", log_norms = False,
                  reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", single_conv = True, mechanisms = [None, None, None, None]):
-        super(RKAN_ResNet, self).__init__()
+        super(RKAN_WideResNet, self).__init__()
 
         self.used_parameters = set()
         self.printed_params = False
@@ -18,9 +18,9 @@ class RKAN_ResNet(nn.Module):
         self.log_norms = log_norms
         
         if pretrained:
-            self.resnet = getattr(models, version)(weights = "DEFAULT")
+            self.wideresnet = getattr(models, version)(weights = "DEFAULT")
         else:
-            self.resnet = getattr(models, version)(weights = None)
+            self.wideresnet = getattr(models, version)(weights = None)
 
         if log_norms:
             self.base_norms = []
@@ -32,23 +32,20 @@ class RKAN_ResNet(nn.Module):
 
         if dataset_size == "small":
             self.kan_conv_main = KAN_Convolutional_Layer(n_convs = 1, kernel_size = (3, 3), stride = (1, 1), padding = (1, 1), grid_size = grid_size)
-            self.resnet.conv1 = nn.Conv2d(3, 64, kernel_size = 3, stride = 1, padding = 1, bias = False)
-            self.resnet.maxpool = nn.Identity()
+            self.wideresnet.conv1 = nn.Conv2d(3, 64, kernel_size = 3, stride = 1, padding = 1, bias = False)
+            self.wideresnet.maxpool = nn.Identity()
         elif dataset_size == "medium":
             self.kan_conv_main = KAN_Convolutional_Layer(n_convs = 1, kernel_size = (7, 7), stride = (2, 2), padding = (3, 3), grid_size = grid_size)
-            self.resnet.maxpool = nn.Identity()
+            self.wideresnet.maxpool = nn.Identity()
         elif dataset_size == "large":
             self.kan_conv_main = KAN_Convolutional_Layer(n_convs = 1, kernel_size = (7, 7), stride = (2, 2), padding = (3, 3), grid_size = grid_size)
         else:
             raise ValueError(f"Invalid value for dataset_size: {dataset_size}. Choose 'small', 'medium', or 'large'.")
 
-        self.resnet.fc = nn.Linear(self.resnet.fc.in_features, num_classes)
+        self.wideresnet.fc = nn.Linear(self.wideresnet.fc.in_features, num_classes)
         layer_config = {
-            "resnet18": [64, 128, 256, 512],
-            "resnet34": [64, 128, 256, 512],
-            "resnet50": [256, 512, 1024, 2048],
-            "resnet101": [256, 512, 1024, 2048],
-            "resnet152": [256, 512, 1024, 2048]
+            "wide_resnet50_2": [256, 512, 1024, 2048],
+            "wide_resnet101_2": [256, 512, 1024, 2048]
         }
         channels = layer_config[version]
 
@@ -66,7 +63,7 @@ class RKAN_ResNet(nn.Module):
 
         # Optional KAN layers
         self.conv_expand_main = nn.Conv2d(3, 64, kernel_size = 1, stride = 1, bias = False)
-        self.kan_linear = KANLinear(in_features = self.resnet.fc.in_features, out_features = num_classes, grid_size = grid_size)
+        self.kan_linear = KANLinear(in_features = self.wideresnet.fc.in_features, out_features = num_classes, grid_size = grid_size)
 
         ## Bottleneck for KAN
         self.conv_reduce = nn.ModuleList([
@@ -87,23 +84,9 @@ class RKAN_ResNet(nn.Module):
         self.kan_bn1 = nn.ModuleList([nn.BatchNorm2d(ch // reduce_factor[i]) for i, ch in enumerate([64] + channels[:-1])])
         self.kan_bn2 = nn.ModuleList([nn.BatchNorm2d(ch // reduce_factor[i]) for i, ch in enumerate([64] + channels[:-1])])
         self.kan_expand_bn = nn.ModuleList([nn.BatchNorm2d(ch) for ch in channels])
-        self.kan_reduce_bn = nn.ModuleList([nn.BatchNorm2d(ch // reduce_factor[i]) for i, ch in enumerate([64] + channels[:-1])])
 
         # Residual mechanisms
-        self.gate_convs = nn.ModuleList([nn.Conv2d(ch, ch, kernel_size = 1) for ch in channels])
-        self.gamma_convs = nn.ModuleList([nn.Conv2d(ch, ch, kernel_size = 1) for ch in channels])
-        self.beta_convs = nn.ModuleList([nn.Conv2d(ch, ch, kernel_size = 1) for ch in channels])
-        self.attention_convs = nn.ModuleList([nn.Conv2d(ch * 2, 2, kernel_size = 1) for ch in channels])
-        self.glu_conv_upscale = nn.ModuleList([nn.Conv2d(ch // 2, ch, kernel_size = 1) for ch in channels])
         self.se_blocks = nn.ModuleList([self._make_se_block(ch, reduction = 16) for ch in channels])
-        self.cbam_channel = nn.ModuleList([self._make_cbam_channel_block(ch, reduction = 16) for ch in channels])
-
-        self.cbam_spatial = nn.ModuleList([
-            nn.Conv2d(2, 1, kernel_size = 7, padding = 3),
-            nn.Conv2d(2, 1, kernel_size = 7, padding = 3),
-            nn.Conv2d(2, 1, kernel_size = 5, padding = 2),
-            nn.Conv2d(2, 1, kernel_size = 3, padding = 1)
-        ])
         
     def _make_se_block(self, channels, reduction = 16):
         return nn.Sequential(
@@ -114,14 +97,6 @@ class RKAN_ResNet(nn.Module):
             nn.Sigmoid()
     )
     
-    def _make_cbam_channel_block(self, channels, reduction = 16):
-        return nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(channels, channels // reduction, 1),
-            nn.ReLU(),
-            nn.Conv2d(channels // reduction, channels, 1)
-        )
-    
     def apply_mechanism(self, out, residual, layer_index, mechanism):
         if mechanism == "mult_sigmoid":
             return out * (1 + torch.sigmoid(residual))
@@ -129,60 +104,13 @@ class RKAN_ResNet(nn.Module):
         elif mechanism == "tanh":
             return out + torch.tanh(residual) * out
         
-        elif mechanism == "sigmoid":
-            return out + torch.sigmoid(residual) * out
-        
-        elif mechanism == "relu":
-            return out + torch.relu(residual)
-        
-        elif mechanism == "exp":
-            return out * torch.exp(torch.tanh(residual))
-        
-        elif mechanism == "sig_tanh":
-            return out + torch.sigmoid(residual) * torch.tanh(residual) * out
-        
         elif mechanism == "addition":
             return out + residual
-        
-        elif mechanism == "gating":
-            gate = torch.sigmoid(self.gate_convs[layer_index](residual))
-            return out * gate + residual * (1 - gate)
         
         elif mechanism == "se":
             se_weight = self.se_blocks[layer_index](residual)
             self._add_params([self.se_blocks[layer_index]])
             return out * se_weight + residual
-        
-        elif mechanism == "film":
-            gamma = self.gamma_convs[layer_index](residual)
-            beta = self.beta_convs[layer_index](residual)
-            self._add_params([self.gamma_convs[layer_index], self.beta_convs[layer_index]])
-            return out * (1 + gamma) + beta
-        
-        elif mechanism == "attention":
-            combined = torch.cat([out, residual], dim = 1)
-            attention = torch.softmax(self.attention_convs[layer_index](combined), dim = 1)
-            self._add_params([self.attention_convs[layer_index]])
-            return out * attention[:, 0:1] + residual * attention[:, 1:2]
-        
-        elif mechanism == "glu":
-            channels = residual.size(1)
-            gate = torch.sigmoid(residual[:, :channels // 2])
-            gated_residual = residual[:, channels // 2:] * gate
-            gated_residual = self.glu_conv_upscale[layer_index](gated_residual)
-            self._add_params([self.glu_conv_upscale[layer_index]])
-            return out + gated_residual
-        
-        elif mechanism == "cbam":
-            avg_pool = torch.mean(residual, dim = (2, 3), keepdim = True)
-            max_pool = torch.max(residual, dim = 2, keepdim = True)[0].max(dim = 3, keepdim = True)[0]
-            channel_attention = torch.sigmoid(self.cbam_channel[layer_index](avg_pool) + self.cbam_channel[layer_index](max_pool))
-            residual = residual * channel_attention
-            avg_pool = torch.mean(residual, dim = 1, keepdim = True)
-            max_pool = torch.max(residual, dim = 1, keepdim = True)[0]
-            spatial_attention = torch.sigmoid(self.cbam_spatial[layer_index](torch.cat([avg_pool, max_pool], dim = 1)))
-            self._add_params([self.cbam_channel[layer_index], self.cbam_spatial[layer_index]])
-            return out + residual * spatial_attention
         
         else:
             raise ValueError(f"Invalid mechanism: {mechanism}.")
@@ -197,23 +125,23 @@ class RKAN_ResNet(nn.Module):
         self.base_norms = []
         self.residual_norms = []
         self.combined_norms = []
-
+    
     def forward(self, x):
-        if self.main_conv == "resnet":
-            out = self.resnet.conv1(x)
-            out = self.resnet.bn1(out)
-            out = self.resnet.relu(out)
-            out = self.resnet.maxpool(out)
-            self._add_params([self.resnet.conv1, self.resnet.bn1])
+        if self.main_conv == "wideresnet":
+            out = self.wideresnet.conv1(x)
+            out = self.wideresnet.bn1(out)
+            out = self.wideresnet.relu(out)
+            out = self.wideresnet.maxpool(out)
+            self._add_params([self.wideresnet.conv1, self.wideresnet.bn1])
         elif self.main_conv == "kan":
             out = self.conv_expand_main(self.kan_conv_main(x))
-            out = self.resnet.bn1(out)
-            out = self.resnet.maxpool(out)
-            self._add_params([self.kan_conv_main, self.conv_expand_main, self.resnet.bn1])
+            out = self.wideresnet.bn1(out)
+            out = self.wideresnet.maxpool(out)
+            self._add_params([self.kan_conv_main, self.conv_expand_main, self.wideresnet.bn1])
         else:
-            raise ValueError(f"Invalid value for main_conv: {self.main_conv}. Choose 'resnet' or 'kan'.")
+            raise ValueError(f"Invalid value for main_conv: {self.main_conv}. Choose 'wideresnet' or 'kan'.")
         
-        layers = [self.resnet.layer1, self.resnet.layer2, self.resnet.layer3, self.resnet.layer4]
+        layers = [self.wideresnet.layer1, self.wideresnet.layer2, self.wideresnet.layer3, self.wideresnet.layer4]
         for i, (layer, mechanism) in enumerate(zip(layers, self.mechanisms)):
             identity = out
             out = layer(out)
@@ -238,16 +166,16 @@ class RKAN_ResNet(nn.Module):
                     self.combined_norms.append(torch.norm(out).item())
                 self._add_params([self.conv_reduce[i], self.conv_expand[i], self.kan_expand_bn[i]])
 
-        out = self.resnet.avgpool(out)
+        out = self.wideresnet.avgpool(out)
         out = torch.flatten(out, 1)
-        if self.fcl == "resnet":
-            out = self.resnet.fc(out)
-            self._add_params([self.resnet.fc])
+        if self.fcl == "wideresnet":
+            out = self.wideresnet.fc(out)
+            self._add_params([self.wideresnet.fc])
         elif self.fcl == "kan":
             out = self.kan_linear(out)
             self._add_params([self.kan_linear])
         else:
-            raise ValueError(f"Invalid value for fcl: {self.fcl}. Choose 'resnet' or 'kan'.")
+            raise ValueError(f"Invalid value for fcl: {self.fcl}. Choose 'wideresnet' or 'kan'.")
 
         if not self.printed_params:
             total_params = sum(p.numel() for p in self.used_parameters)

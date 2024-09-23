@@ -21,7 +21,7 @@ class KAN_Convolutional_Layer(torch.nn.Module):
             scale_spline: float = 1.0,
             base_activation = torch.nn.SiLU,
             grid_eps: float = 0.02,
-            grid_range: tuple = [-1, 1],
+            grid_range: tuple = (-1, 1),
             chebyshev_degree: int = 3,
             kan_type: str = "b_spline",
             use_linear: bool = True,
@@ -88,7 +88,7 @@ class KAN_Convolutional_Layer(torch.nn.Module):
     def forward(self, x: torch.Tensor, update_grid = False):
         # If there are multiple convolutions, apply them all
         if self.n_convs>1:
-            return convolution.multiple_convs_kan_conv2d(x, self.convs,self.kernel_size[0],self.stride,self.dilation,self.padding,self.device)
+            return convolution.multiple_convs_kan_conv2d(x, list(self.convs), self.kernel_size[0], self.stride,self.dilation, self.padding,self.device)
         
         # If there is only one convolution, apply it
         return self.convs[0].forward(x)
@@ -108,7 +108,7 @@ class KAN_Convolution(torch.nn.Module):
             scale_spline: float = 1.0,
             base_activation=torch.nn.SiLU,
             grid_eps: float = 0.02,
-            grid_range: tuple = [-1, 1],
+            grid_range: tuple = (-1, 1),
             chebyshev_degree: int = 3,
             kan_type: str = "b_spline",
             use_linear: bool = True,
@@ -146,7 +146,7 @@ class KAN_Convolution(torch.nn.Module):
                 chebyshev_degree = chebyshev_degree,
                 base_activation = base_activation,
                 use_linear = use_linear,
-                normalization = "standardization",
+                normalization = "tanh",
                 use_layernorm = False,
                 clip_min = -5.0,
                 clip_max = 5.0,
@@ -174,5 +174,4 @@ class KAN_Convolution(torch.nn.Module):
             raise ValueError(f"Unsupported kan_type: {kan_type}. Choose from 'rbf', 'chebyshev', 'b_spline'.")
 
     def forward(self, x: torch.Tensor, update_grid = False):
-        return convolution.kan_conv2d(x, self.conv,self.kernel_size[0],self.stride,self.dilation,self.padding,self.device)
-    
+        return convolution.kan_conv2d(x, self.conv, self.kernel_size[0], self.stride, self.dilation,self.padding, self.device)  

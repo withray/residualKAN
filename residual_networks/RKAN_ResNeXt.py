@@ -5,7 +5,7 @@ from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from KAN_Conv.KANLinear import KANLinear
 
 class RKAN_ResNeXt(nn.Module):
-    def __init__(self, num_classes = 100, version = "resnext50_32x4d", kan_type = "chebyshev", pretrained = False, main_conv = "resnext", fcl = "resnext",
+    def __init__(self, num_classes = 100, version = "resnext50_32x4d", kan_type = "chebyshev", pretrained = False, main_conv = "resnext", fcl = "resnext", log_norms = False,
                  reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", single_conv = True, mechanisms = [None, None, None, None]):
         super(RKAN_ResNeXt, self).__init__()
 
@@ -15,11 +15,17 @@ class RKAN_ResNeXt(nn.Module):
         self.mechanisms = mechanisms
         self.fcl = fcl
         self.main_conv = main_conv
+        self.log_norms = log_norms
         
         if pretrained:
             self.resnext = getattr(models, version)(weights = "DEFAULT")
         else:
             self.resnext = getattr(models, version)(weights = None)
+
+        if log_norms:
+            self.base_norms = []
+            self.residual_norms = []
+            self.combined_norms = []
 
         if len(self.mechanisms) != 4:
             raise ValueError(f"Length of mechanisms ({len(self.mechanisms)}) must match the number of stages (4).")
@@ -43,7 +49,7 @@ class RKAN_ResNeXt(nn.Module):
         }
         channels = layer_config[version]
 
-        # KAN convolutions for each layer: b_spline, rbf, chebyshev
+        # KAN convolutions for each layer
         self.kan_conv1 = nn.ModuleList([
             KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (1, 1) if i == 0 else (2, 2),
                                     padding = (1, 1), grid_size = grid_size, kan_type = kan_type)
@@ -107,13 +113,18 @@ class RKAN_ResNeXt(nn.Module):
             return out * se_weight + residual
         
         else:
-            return None
+            raise ValueError(f"Invalid mechanism: {mechanism}.")
             
     def _add_params(self, modules):
         for module in modules:
             for param in module.parameters():
                 if param.requires_grad:
                     self.used_parameters.add(param)
+
+    def reset_norms(self):
+        self.base_norms = []
+        self.residual_norms = []
+        self.combined_norms = []
     
     def forward(self, x):
         if self.main_conv == "resnext":
@@ -147,7 +158,12 @@ class RKAN_ResNeXt(nn.Module):
                     self._add_params([self.kan_conv1[i]])
                 residual = self.conv_expand[i](residual)
                 residual = self.kan_expand_bn[i](residual)
+                if self.log_norms:
+                    self.base_norms.append(torch.norm(out).item())
+                    self.residual_norms.append(torch.norm(residual).item())
                 out = self.apply_mechanism(out, residual, i, mechanism)
+                if self.log_norms:
+                    self.combined_norms.append(torch.norm(out).item())
                 self._add_params([self.conv_reduce[i], self.conv_expand[i], self.kan_expand_bn[i]])
 
         out = self.resnext.avgpool(out)

@@ -27,7 +27,7 @@ class RKAN_VGG(nn.Module):
 
         if dataset_size == "small":
             self.stem[-1] = nn.Identity()
-            self.stages[0][-1] = nn.Identity()
+            self.stages[0] = nn.Sequential(*list(self.stages[0].children())[:-1], nn.Identity())
         elif dataset_size == "medium":
             self.stem[-1] = nn.Identity()
         elif dataset_size == "large":
@@ -46,7 +46,7 @@ class RKAN_VGG(nn.Module):
         )
         channels = [128, 256, 512, 512]
 
-        # KAN convolutions for each layer: b_spline, rbf, chebyshev
+        # KAN convolutions for each layer
         self.kan_conv1 = nn.ModuleList([
             KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (1, 1) if dataset_size == "small" and i == 0 else (2, 2),
                                     padding = (1, 1), grid_size = grid_size, kan_type = kan_type)
@@ -86,7 +86,8 @@ class RKAN_VGG(nn.Module):
 
     def _get_vgg_stages(self, vgg):
         features = list(vgg.features)
-        maxpool_indices = [i for i, layer in enumerate(features) if isinstance(layer, nn.MaxPool2d)]    
+        maxpool_indices = [i for i, layer in enumerate(features) if isinstance(layer, nn.MaxPool2d)]
+        features[maxpool_indices[-1]] = nn.MaxPool2d(kernel_size = 2, ceil_mode = True)
         stem = nn.Sequential(*features[:maxpool_indices[0] + 1])
         stages = [nn.Sequential(*features[maxpool_indices[i] + 1:maxpool_indices[i + 1] + 1]) for i in range(len(maxpool_indices) - 1)]
         stage_indices = [maxpool_indices[0]+1] + [maxpool_indices[i]+1 for i in range(1, len(maxpool_indices))]
@@ -117,7 +118,7 @@ class RKAN_VGG(nn.Module):
             return out * se_weight + residual
         
         else:
-            return None
+            raise ValueError(f"Invalid mechanism: {mechanism}.")
             
     def _add_params(self, modules):
         for module in modules:

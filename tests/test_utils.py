@@ -7,7 +7,7 @@ import torch
 import numpy as np
 
 class EarlyStopping:
-    def __init__(self, patience = 20, min_delta = 0, monitor = "loss", path = "cifar100.pt", save_model = False):
+    def __init__(self, patience = 100, min_delta = 0, monitor = "loss", path = "best.pt", save_model = False):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
@@ -71,6 +71,36 @@ def profile_model(model, input_size, device):
     captured_output = io.StringIO()
     with redirect_stdout(captured_output):
         with torch.no_grad():
-            flops, params = profile(model, inputs = (input_tensor,))
+            flops, params, *_ = profile(model, inputs=(input_tensor,))
     print(f"FLOPs: {flops / 1e9:.4f} GFLOPs")
     print(f"Parameters: {params / 1e6:.4f}M")
+
+def cutmix_data(x, y, alpha = 1.0):
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1
+    batch_size = x.size()[0]
+    index = torch.randperm(batch_size).cuda()
+
+    bbx1, bby1, bbx2, bby2 = rand_bbox(x.size(), lam)
+    x[:, :, bbx1:bbx2, bby1:bby2] = x[index, :, bbx1:bbx2, bby1:bby2]
+
+    y_a, y_b = y, y[index]
+    return x, y_a, y_b, lam
+
+def rand_bbox(size, lam):
+    W = size[2]
+    H = size[3]
+    cut_rat = np.sqrt(1. - lam)
+    cut_w = int(W * cut_rat)
+    cut_h = int(H * cut_rat)
+    cx = np.random.randint(W)
+    cy = np.random.randint(H)
+
+    bbx1 = np.clip(cx - cut_w // 2, 0, W)
+    bby1 = np.clip(cy - cut_h // 2, 0, H)
+    bbx2 = np.clip(cx + cut_w // 2, 0, W)
+    bby2 = np.clip(cy + cut_h // 2, 0, H)
+
+    return bbx1, bby1, bbx2, bby2

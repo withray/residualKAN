@@ -32,11 +32,8 @@ class RKAN_RegNet(nn.Module):
             self.regnet.trunk_output[0][0].proj[0].stride = (1, 1)
             self.regnet.trunk_output[0][0].f.b[0].stride = (1, 1)
         elif dataset_size == "medium":
-            self.regnet.stem = nn.Sequential(
-                nn.Conv2d(3, 32, kernel_size = 3, stride = 1, padding = 1, bias = False),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace = True)
-            )
+            self.regnet.trunk_output[0][0].proj[0].stride = (1, 1)
+            self.regnet.trunk_output[0][0].f.b[0].stride = (1, 1)
         elif dataset_size == "large":
             pass
         else:
@@ -52,7 +49,7 @@ class RKAN_RegNet(nn.Module):
         channels = layer_config[version]
 
 
-        # KAN convolutions for each layer: b_spline, rbf, chebyshev
+        # KAN convolutions for each layer
         self.kan_conv1 = nn.ModuleList([
             KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (1, 1) if dataset_size == "small" and i == 0 else (2, 2),
                                     padding = (1, 1), grid_size = grid_size, kan_type = kan_type)
@@ -115,7 +112,7 @@ class RKAN_RegNet(nn.Module):
             return out * se_weight + residual
         
         else:
-            return None
+            raise ValueError(f"Invalid mechanism: {mechanism}.")
         
     def _add_params(self, modules):
         for module in modules:

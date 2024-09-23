@@ -164,6 +164,8 @@ class KANLinear(torch.nn.Module):
 
         if self.use_linear:
             base_output = F.linear(self.base_activation(x), self.base_weight)
+        else:
+            base_output = 0
 
         spline_output = F.linear(
             self.b_splines(x).view(x.size(0), -1),

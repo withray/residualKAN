@@ -10,7 +10,8 @@ class ChebyshevKANLinear(torch.nn.Module):
         enable_chebyshev_scaler = True,
         base_activation = torch.nn.SiLU,
         use_linear = True,
-        normalization = "standardization",
+        use_identity_mapping = True,
+        normalization = "tanh",
         use_layernorm = False,
         clip_min = -5.0,
         clip_max = 5.0,
@@ -22,6 +23,7 @@ class ChebyshevKANLinear(torch.nn.Module):
         self.out_features = out_features
         self.chebyshev_degree = chebyshev_degree
         self.use_linear = use_linear
+        self.use_identity_mapping = use_identity_mapping
         self.normalization = normalization
         self.use_layernorm = use_layernorm
         self.use_clip = use_clip
@@ -62,7 +64,9 @@ class ChebyshevKANLinear(torch.nn.Module):
         if self.use_layernorm:
             x = self.layernorm(x)
 
-        if self.use_linear:
+        if self.use_identity_mapping:
+            base_output = self.base_linear(x)
+        else:
             base_output = self.base_linear(self.base_activation(x))
 
         if self.normalization == "min-max":
@@ -73,6 +77,8 @@ class ChebyshevKANLinear(torch.nn.Module):
             x_mapped = (x - x.mean(dim = 1, keepdim = True)) / (x.std(dim = 1, keepdim = True) + self.eps)
             if self.use_clip:
                 x_mapped = torch.clamp(x_mapped, min = self.clip_min, max = self.clip_max)
+        elif self.normalization == "bypass":
+            x_mapped = x
         else:
             raise ValueError(f"Unsupported normalization method: {self.normalization}")
         chebyshev_bases = self.chebyshev_polynomials(x_mapped)
@@ -81,6 +87,6 @@ class ChebyshevKANLinear(torch.nn.Module):
             chebyshev_weight = self.chebyshev_weight * self.chebyshev_scaler.unsqueeze(-1)
         else:
             chebyshev_weight = self.chebyshev_weight
-        chebyshev_output = torch.einsum('bi,oic,bic->bo', x, chebyshev_weight, chebyshev_bases)
+        chebyshev_output = torch.einsum('bic,oic->bo', chebyshev_bases, chebyshev_weight)
 
         return base_output + chebyshev_output if self.use_linear else chebyshev_output

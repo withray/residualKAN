@@ -6,7 +6,7 @@ from KAN_Conv.KANLinear import KANLinear
 
 class RKAN_ConvNeXt(nn.Module):
     def __init__(self, num_classes = 100, version = "convnext_tiny", kan_type = "chebyshev", pretrained = False, fcl = "convnext",
-                 reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, single_conv = True, mechanisms = [None, None, None, None]):
+                 reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", single_conv = True, mechanisms = [None, None, None, None]):
         super(RKAN_ConvNeXt, self).__init__()
 
         self.used_parameters = set()
@@ -22,6 +22,15 @@ class RKAN_ConvNeXt(nn.Module):
 
         if len(self.mechanisms) != 4:
             raise ValueError(f"Length of mechanisms ({len(self.mechanisms)}) must match the number of stages (4).")
+        
+        if dataset_size == "small":
+            self.convnext.features[0][0] = nn.Conv2d(3, 96, kernel_size = 4, stride = 1, padding = 1)
+        elif dataset_size == "medium":
+            self.convnext.features[0][0] = nn.Conv2d(3, 96, kernel_size = 4, stride = 2, padding = 1)
+        elif dataset_size == "large":
+            pass
+        else:
+            raise ValueError(f"Invalid value for dataset_size: {dataset_size}. Choose 'small', 'medium', or 'large'.")
 
         self.convnext.classifier[-1] = nn.Linear(self.convnext.classifier[-1].in_features, num_classes)
         layer_config = {
@@ -32,9 +41,9 @@ class RKAN_ConvNeXt(nn.Module):
         }
         channels = layer_config[version]
 
-        # KAN convolutions for each layer: b_spline, rbf, chebyshev
+        # KAN convolutions for each layer
         self.kan_conv1 = nn.ModuleList([
-            KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (1, 1) if i == 0 else (2, 2),
+            KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (1, 1) if i == 3 else (2, 2),
                                     padding = (1, 1), grid_size = grid_size, kan_type = kan_type)
             for i in range(4)
         ])
@@ -50,22 +59,20 @@ class RKAN_ConvNeXt(nn.Module):
         ## Bottleneck for KAN
         self.conv_reduce = nn.ModuleList([
             nn.Conv2d(96, 96 // reduce_factor[0], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d(channels[0], channels[0] // reduce_factor[1], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d(channels[1], channels[1] // reduce_factor[2], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d(channels[2], channels[2] // reduce_factor[3], kernel_size = 1, stride = 1, bias = False)
+            nn.Conv2d(channels[1], channels[1] // reduce_factor[1], kernel_size = 1, stride = 1, bias = False),
+            nn.Conv2d(channels[2], channels[2] // reduce_factor[2], kernel_size = 1, stride = 1, bias = False),
+            nn.Conv2d(channels[3], channels[3] // reduce_factor[3], kernel_size = 1, stride = 1, bias = False)
         ])
 
         self.conv_expand = nn.ModuleList([
-            nn.Conv2d((96 // reduce_factor[0]) * n_convs, channels[0], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d((channels[0] // reduce_factor[1]) * n_convs, channels[1], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d((channels[1] // reduce_factor[2]) * n_convs, channels[2], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d((channels[2] // reduce_factor[3]) * n_convs, channels[3], kernel_size = 1, stride = 1, bias = False)
+            nn.Conv2d((96 // reduce_factor[0]) * n_convs, channels[1], kernel_size = 1, stride = 1, bias = False),
+            nn.Conv2d((channels[1] // reduce_factor[1]) * n_convs, channels[2], kernel_size = 1, stride = 1, bias = False),
+            nn.Conv2d((channels[2] // reduce_factor[2]) * n_convs, channels[3], kernel_size = 1, stride = 1, bias = False),
+            nn.Conv2d((channels[3] // reduce_factor[3]) * n_convs, channels[3], kernel_size = 1, stride = 1, bias = False)
         ])
 
         ## KAN normalization
-        self.kan_bn1 = nn.ModuleList([nn.BatchNorm2d(ch // reduce_factor[i]) for i, ch in enumerate([96] + channels[:-1])])
-        self.kan_bn2 = nn.ModuleList([nn.BatchNorm2d(ch // reduce_factor[i]) for i, ch in enumerate([96] + channels[:-1])])
-        self.kan_expand_bn = nn.ModuleList([nn.BatchNorm2d(ch) for ch in channels])
+        self.kan_expand_bn = nn.ModuleList([nn.BatchNorm2d(channels[1]), nn.BatchNorm2d(channels[2]), nn.BatchNorm2d(channels[3]), nn.BatchNorm2d(channels[3])])
 
         # Residual mechanisms
         self.se_blocks = nn.ModuleList([self._make_se_block(ch, reduction = 16) for ch in channels])
@@ -95,7 +102,7 @@ class RKAN_ConvNeXt(nn.Module):
             return out * se_weight + residual
         
         else:
-            return None
+            raise ValueError(f"Invalid mechanism: {mechanism}.")
             
     def _add_params(self, modules):
         for module in modules:
@@ -106,6 +113,7 @@ class RKAN_ConvNeXt(nn.Module):
     def forward(self, x):
         out = self.convnext.features[0](x)
         self._add_params([self.convnext.features[0]])
+        residual = None
         
         for i in range(1, 8):
             layer = self.convnext.features[i]
@@ -113,8 +121,7 @@ class RKAN_ConvNeXt(nn.Module):
             out = layer(out)
             self._add_params([layer])
             
-            if i in [1, 3, 5] and self.mechanisms[i // 2] is not None:
-                mechanism = self.mechanisms[i // 2]
+            if i in [1, 3, 5, 7] and self.mechanisms[i // 2] is not None:
                 residual = self.conv_reduce[i // 2](identity)
                 if not self.single_conv:
                     residual = self.kan_conv1[i // 2](residual)
@@ -126,8 +133,14 @@ class RKAN_ConvNeXt(nn.Module):
                     
                 residual = self.conv_expand[i // 2](residual)
                 residual = self.kan_expand_bn[i // 2](residual)
-                out = self.apply_mechanism(out, residual, i // 2, mechanism)
                 self._add_params([self.conv_reduce[i // 2], self.conv_expand[i // 2], self.kan_expand_bn[i // 2]])
+            
+            if i in [2, 4, 6, 7] and residual is not None:
+                if i in [7]:
+                    out = self.apply_mechanism(out, residual, i // 2, self.mechanisms[i // 2])
+                else:
+                    out = self.apply_mechanism(out, residual, (i // 2) - 1, self.mechanisms[(i // 2) - 1])
+                residual = None
         
         out = self.convnext.avgpool(out)
         if self.fcl == "convnext":

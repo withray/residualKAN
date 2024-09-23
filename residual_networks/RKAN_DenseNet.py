@@ -6,20 +6,28 @@ from KAN_Conv.KANLinear import KANLinear
 
 class RKAN_DenseNet(nn.Module):
     def __init__(self, num_classes = 100, version = "densenet121", kan_type = "chebyshev", pretrained = False, main_conv = "densenet", fcl = "densenet",
-                 reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", pre_transition = False, mechanisms = [None, None, None, None]):
+                 single_conv = True, log_norms = False, reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small",
+                 pre_transition = False, mechanisms = [None, None, None, None]):
         super(RKAN_DenseNet, self).__init__()
 
         self.used_parameters = set()
         self.printed_params = False
         self.pre_transition = pre_transition
+        self.single_conv = single_conv
         self.mechanisms = mechanisms
         self.fcl = fcl
         self.main_conv = main_conv
+        self.log_norms = log_norms
         
         if pretrained:
             self.densenet = getattr(models, version)(weights = "DEFAULT")
         else:
             self.densenet = getattr(models, version)(weights = None)
+
+        if log_norms:
+            self.base_norms = []
+            self.residual_norms = []
+            self.combined_norms = []
 
         if len(self.mechanisms) != 4:
             raise ValueError(f"Length of mechanisms ({len(self.mechanisms)}) must match the number of stages (4).")
@@ -46,6 +54,11 @@ class RKAN_DenseNet(nn.Module):
 
         # KAN convolutions for each layer
         self.kan_conv_pre = nn.ModuleList([
+            KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (1, 1), padding = (1, 1), grid_size = grid_size, kan_type = kan_type)
+            for _ in range(4)
+        ])
+
+        self.kan_conv = nn.ModuleList([
             KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (1, 1), padding = (1, 1), grid_size = grid_size, kan_type = kan_type)
             for _ in range(4)
         ])
@@ -113,13 +126,18 @@ class RKAN_DenseNet(nn.Module):
             return out * se_weight + residual
         
         else:
-            return None
+            raise ValueError(f"Invalid mechanism: {mechanism}.")
         
     def _add_params(self, modules):
         for module in modules:
             for param in module.parameters():
                 if param.requires_grad:
                     self.used_parameters.add(param)
+
+    def reset_norms(self):
+        self.base_norms = []
+        self.residual_norms = []
+        self.combined_norms = []
     
     def forward(self, x):
         if self.main_conv == "densenet":
@@ -153,10 +171,21 @@ class RKAN_DenseNet(nn.Module):
             # Pre-transition mechanism without batch normalization
             if self.pre_transition and mechanism is not None:
                 residual = self.conv_reduce[i](identity)
-                residual = self.kan_conv_pre[i](residual)
+                if not self.single_conv:
+                    residual = self.kan_conv_pre[i](residual)
+                    residual = self.kan_conv[i](residual)
+                    self._add_params([self.kan_conv_pre[i], self.kan_conv[i]])
+                else:
+                    residual = self.kan_conv_pre[i](residual)
+                    self._add_params([self.kan_conv_pre[i]])
                 residual = self.conv_expand_pre[i](residual)
+                if self.log_norms:
+                    self.base_norms.append(torch.norm(out).item())
+                    self.residual_norms.append(torch.norm(residual).item())
                 out = self.apply_mechanism(out, residual, i, mechanism)
-                self._add_params([self.conv_reduce[i], self.kan_conv_pre[i], self.conv_expand_pre[i]])
+                if self.log_norms:
+                    self.combined_norms.append(torch.norm(out).item())
+                self._add_params([self.conv_reduce[i], self.conv_expand_pre[i]])
 
             # Apply norm5 and ReLU after adding residual to the output of the last dense block if pre-transition
             if self.pre_transition and i == len(dense_blocks) - 1:
@@ -171,11 +200,22 @@ class RKAN_DenseNet(nn.Module):
             # Post-transition mechanism
             if not self.pre_transition and mechanism is not None:
                 residual = self.conv_reduce[i](identity)
-                residual = self.kan_conv_post[i](residual)
+                if not self.single_conv:
+                    residual = self.kan_conv_post[i](residual)
+                    residual = self.kan_conv[i](residual)
+                    self._add_params([self.kan_conv_post[i], self.kan_conv[i]])
+                else:
+                    residual = self.kan_conv_post[i](residual)
+                    self._add_params([self.kan_conv_post[i]])
                 residual = self.conv_expand_post[i](residual)
                 residual = self.kan_bn[i](residual)
+                if self.log_norms:
+                    self.base_norms.append(torch.norm(out).item())
+                    self.residual_norms.append(torch.norm(residual).item())
                 out = self.apply_mechanism(out, residual, i, mechanism)
-                self._add_params([self.conv_reduce[i], self.kan_conv_post[i], self.conv_expand_post[i], self.kan_bn[i]])
+                if self.log_norms:
+                    self.combined_norms.append(torch.norm(out).item())
+                self._add_params([self.conv_reduce[i], self.conv_expand_post[i], self.kan_bn[i]])
 
         out = torch.nn.functional.adaptive_avg_pool2d(out, (1, 1))
         out = torch.flatten(out, 1)

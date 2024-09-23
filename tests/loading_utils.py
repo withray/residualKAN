@@ -18,10 +18,17 @@ class ImageNetValDataset(Dataset):
 
             tree = ET.parse(ann_path)
             root = tree.getroot()
-            synset = root.find("object").find("name").text
-            label = self.synset_to_class[synset]
-
-            self.imgs.append((img_path, label))
+            object_elem = root.find("object")
+            if object_elem is not None:
+                name_elem = object_elem.find("name")
+                if name_elem is not None:
+                    synset = name_elem.text
+                    label = self.synset_to_class[synset]
+                    self.imgs.append((img_path, label))
+                else:
+                    print(f"'name' not found in {ann_path}")
+            else:
+                print(f"'object' not found in {ann_path}")
 
     def __len__(self):
         return len(self.imgs)
