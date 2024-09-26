@@ -2,5 +2,6 @@ cifar_data/
 svhn_data/
 imagenet-object-localization-challenge/
 tiny-imagenet-200/
+food-101/
 __pycache__/
 *.pyc

@@ -4,6 +4,7 @@
         "imagenet-object-localization-challenge",
         "tiny-imagenet-200",
         "svhn_data",
+        "food-101",
         "**/*.jpg",
         "**/*.png"
     ]
