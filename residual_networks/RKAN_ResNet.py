@@ -5,8 +5,9 @@ from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from KAN_Conv.KANLinear import KANLinear
 
 class RKAN_ResNet(nn.Module):
-    def __init__(self, num_classes = 100, version = "resnet18", kan_type = "chebyshev", pretrained = False, main_conv = "resnet", fcl = "resnet", log_norms = False,
-                 reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", single_conv = True, mechanisms = [None, None, None, None]):
+    def __init__(self, num_classes = 100, version = "resnet18", kan_type = "chebyshev", pretrained = False, main_conv = "resnet",
+                 fcl = "resnet", log_norms = False, reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small",
+                 single_conv = True, mechanisms = [None, None, None, None], scaling = False, freeze_weights = False):
         super(RKAN_ResNet, self).__init__()
 
         self.used_parameters = set()
@@ -16,9 +17,19 @@ class RKAN_ResNet(nn.Module):
         self.fcl = fcl
         self.main_conv = main_conv
         self.log_norms = log_norms
+        self.scaling = scaling
+
+        if self.scaling:
+            self.scaling_factor = nn.Parameter(torch.ones(1))
         
         if pretrained:
             self.resnet = getattr(models, version)(weights = "DEFAULT")
+            if freeze_weights:
+                for name, param in self.resnet.named_parameters():
+                    if "fc" in name:
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False 
         else:
             self.resnet = getattr(models, version)(weights = None)
 
@@ -123,6 +134,9 @@ class RKAN_ResNet(nn.Module):
         )
     
     def apply_mechanism(self, out, residual, layer_index, mechanism):
+        if self.scaling:
+            residual = residual * self.scaling_factor
+            
         if mechanism == "mult_sigmoid":
             return out * (1 + torch.sigmoid(residual))
         

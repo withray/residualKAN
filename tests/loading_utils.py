@@ -1,7 +1,6 @@
 from torch.utils.data import Dataset
 from PIL import Image
 import os
-import torch
 import xml.etree.ElementTree as ET
 
 class ImageNetValDataset(Dataset):
@@ -40,36 +39,6 @@ class ImageNetValDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        return image, label
-    
-class Food101Dataset(Dataset):
-    def __init__(self, root_dir, txt_file, transform = None):
-        self.root_dir = root_dir
-        self.transform = transform
-        self.image_paths = []
-        self.labels = []
-        
-        self.label_to_index = {}
-        with open(txt_file, "r") as f:
-            for line in f:
-                line = line.strip()
-                class_name = line.split("/")[0]
-                if class_name not in self.label_to_index:
-                    self.label_to_index[class_name] = len(self.label_to_index)
-                self.image_paths.append(os.path.join(self.root_dir, line + ".jpg"))
-                self.labels.append(self.label_to_index[class_name])
-    
-    def __len__(self):
-        return len(self.image_paths)
-    
-    def __getitem__(self, idx):
-        img_path = self.image_paths[idx]
-        label = torch.tensor(self.labels[idx], dtype = torch.long)
-        image = Image.open(img_path).convert("RGB")
-        
-        if self.transform:
-            image = self.transform(image)
-        
         return image, label
     
 def generate_synset_to_class_mapping(train_dir):

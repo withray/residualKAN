@@ -6,7 +6,7 @@ from KAN_Conv.KANLinear import KANLinear
 
 class RKAN_ResNeXt(nn.Module):
     def __init__(self, num_classes = 100, version = "resnext50_32x4d", kan_type = "chebyshev", pretrained = False, main_conv = "resnext", fcl = "resnext", log_norms = False,
-                 reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", single_conv = True, mechanisms = [None, None, None, None]):
+                 reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", single_conv = True, mechanisms = [None, None, None, None], scaling = False):
         super(RKAN_ResNeXt, self).__init__()
 
         self.used_parameters = set()
@@ -16,6 +16,10 @@ class RKAN_ResNeXt(nn.Module):
         self.fcl = fcl
         self.main_conv = main_conv
         self.log_norms = log_norms
+        self.scaling = scaling
+
+        if self.scaling:
+            self.scaling_factor = nn.Parameter(torch.ones(1))
         
         if pretrained:
             self.resnext = getattr(models, version)(weights = "DEFAULT")
@@ -98,6 +102,9 @@ class RKAN_ResNeXt(nn.Module):
     )
     
     def apply_mechanism(self, out, residual, layer_index, mechanism):
+        if self.scaling:
+            residual = residual * self.scaling_factor
+            
         if mechanism == "mult_sigmoid":
             return out * (1 + torch.sigmoid(residual))
         

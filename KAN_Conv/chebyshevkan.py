@@ -10,7 +10,7 @@ class ChebyshevKANLinear(torch.nn.Module):
         enable_chebyshev_scaler = True,
         base_activation = torch.nn.SiLU,
         use_linear = True,
-        use_identity_mapping = True,
+        skip_activation = True,
         normalization = "tanh",
         use_layernorm = False,
         clip_min = -5.0,
@@ -23,7 +23,7 @@ class ChebyshevKANLinear(torch.nn.Module):
         self.out_features = out_features
         self.chebyshev_degree = chebyshev_degree
         self.use_linear = use_linear
-        self.use_identity_mapping = use_identity_mapping
+        self.skip_activation = skip_activation
         self.normalization = normalization
         self.use_layernorm = use_layernorm
         self.use_clip = use_clip
@@ -64,7 +64,7 @@ class ChebyshevKANLinear(torch.nn.Module):
         if self.use_layernorm:
             x = self.layernorm(x)
 
-        if self.use_identity_mapping:
+        if self.skip_activation:
             base_output = self.base_linear(x)
         else:
             base_output = self.base_linear(self.base_activation(x))

@@ -6,7 +6,7 @@ from KAN_Conv.KANLinear import KANLinear
 
 class RKAN_ConvNeXt(nn.Module):
     def __init__(self, num_classes = 100, version = "convnext_tiny", kan_type = "chebyshev", pretrained = False, fcl = "convnext",
-                 reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", single_conv = True, mechanisms = [None, None, None, None]):
+                 reduce_factor = [4, 4, 4, 4], grid_size = 5, n_convs = 1, dataset_size = "small", single_conv = True, mechanisms = [None, None, None, None], scaling = False):
         super(RKAN_ConvNeXt, self).__init__()
 
         self.used_parameters = set()
@@ -14,6 +14,10 @@ class RKAN_ConvNeXt(nn.Module):
         self.single_conv = single_conv
         self.mechanisms = mechanisms
         self.fcl = fcl
+        self.scaling = scaling
+
+        if self.scaling:
+            self.scaling_factor = nn.Parameter(torch.ones(1))
         
         if pretrained:
             self.convnext = getattr(models, version)(weights = "DEFAULT")
@@ -87,6 +91,9 @@ class RKAN_ConvNeXt(nn.Module):
     )
     
     def apply_mechanism(self, out, residual, layer_index, mechanism):
+        if self.scaling:
+            residual = residual * self.scaling_factor
+            
         if mechanism == "mult_sigmoid":
             return out * (1 + torch.sigmoid(residual))
         
