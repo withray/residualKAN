@@ -1,3 +1,4 @@
+# Credits to: https://github.com/AntonioTepsich/Convolutional-KANs
 import torch
 import math
 from KAN_Conv.KANLinear import KANLinear
