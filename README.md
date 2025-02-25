@@ -11,7 +11,9 @@ Despite their immense success, deep neural networks (CNNs) are costly to train, 
 
 You can also find our paper on [arXiv](https://arxiv.org/abs/2410.05500).
 
-Networks are trained from scratch for 200 epochs (100 epochs on ImageNet) using stochastic gradient descent (SGD) with a weight decay of 0.0005. RandAugment, CutMix with a 50\% probability, and MixUp ($\alpha = 0.2$) with a 30\% probability are used as data augmentation. RKAN blocks are added primarily to the fourth stage of the network.
+Networks are trained from scratch for 200 epochs using stochastic gradient descent (SGD) with a weight decay of 0.0005 (100 epochs on ImageNet with a weight decay of 0.0001). RandAugment, CutMix with a 50\% probability, and MixUp ($\alpha = 0.2$) with a 30\% probability are used as data augmentation. RKAN blocks are added primarily to the fourth stage of the network except for ConvNeXt and Swin where the block is implemented into the second stage.
+
+It should be noted that the RKAN module performs exceptionally well on small and datasets that are prone to overfitting. Multi-stage RKAN performs better when RKAN blocks are only implemented into the last 2 stages. More details can be found in our original paper. Performance gains for more recent architectures (ConvNeXt and Swin) are not yet observed on ImageNet.
 
 ## Results
 ### CIFAR-100 Results
@@ -28,6 +30,21 @@ Networks are trained from scratch for 200 epochs (100 epochs on ImageNet) using 
 | RKAN-DenseNet-201     | 85.35              | DenseNet-201        | 84.28              |
 | RKAN-DenseNet-169     | 84.84              | DenseNet-169        | 84.00              |
 | RKAN-DenseNet-121     | 84.73              | DenseNet-121        | 84.09              |
+
+### Food-101 Results
+| RKAN Model            | Top-1 Accuracy     | Base Model          | Top-1 Accuracy     |
+|-----------------------|--------------------|---------------------|--------------------|
+| RKAN-ResNeXt-101      | 90.82              | ResNeXt-101         | 89.87              |
+| RKAN-ResNeXt-50       | 90.00              | ResNeXt-50          | 89.20              |
+| RKAN-ResNet-152       | 90.36              | ResNet-152          | 89.70              |
+| RKAN-ResNet-101       | 90.09              | ResNet-101          | 89.29              |
+| RKAN-ResNet-50        | 89.48              | ResNet-50           | 88.84              |
+| RKAN-RegNetY-32GF     | 91.62              | RegNetY-32GF        | 90.72              |
+| RKAN-RegNetY-8GF      | 91.17              | RegNetY-8GF         | 90.43              |
+| RKAN-RegNetY-3.2GF    | 90.09              | RegNetY-3.2GF       | 89.54              |
+| RKAN-DenseNet-201     | 89.58              | DenseNet-201        | 88.83              |
+| RKAN-DenseNet-169     | 89.74              | DenseNet-169        | 89.17              |
+| RKAN-DenseNet-121     | 89.43              | DenseNet-121        | 88.98              |
 
 ### Tiny ImageNet Results
 
@@ -53,6 +70,8 @@ Networks are trained from scratch for 200 epochs (100 epochs on ImageNet) using 
 | RKAN-DenseNet-201     | 75.12              | DenseNet-201        | 73.10              |
 | RKAN-DenseNet-169     | 74.88              | DenseNet-169        | 73.55              |
 | RKAN-DenseNet-121     | 74.13              | DenseNet-121        | 72.76              |
+| RKAN-ConvNeXt-T       | 72.07              | ConvNeXt-T          | 70.78              |
+| RKAN-Swin-T           | 68.48              | Swin-T              | 67.05              |
 
 ### ImageNet Results
 | RKAN Model            | Top-1 Accuracy     | Base Model          | Top-1 Accuracy     |
