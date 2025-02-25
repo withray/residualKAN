@@ -55,14 +55,16 @@ class FastKANLayer(nn.Module):
         grid_max: float = 2.,
         num_grids: int = 5,
         use_base_update: bool = True,
-        use_layernorm: bool = True,
+        use_layernorm: bool = False,
         base_activation = F.silu,
+        skip_activation: bool = True,
         spline_weight_init_scale: float = 0.1,
     ) -> None:
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.layernorm = None
+        self.skip_activation = skip_activation
         if use_layernorm:
             assert input_dim > 1, "Do not use layernorms on 1D inputs. Set `use_layernorm=False`."
             self.layernorm = nn.LayerNorm(input_dim)
@@ -80,7 +82,10 @@ class FastKANLayer(nn.Module):
             spline_basis = self.rbf(x)
         ret = self.spline_linear(spline_basis.view(*spline_basis.shape[:-2], -1))
         if self.use_base_update:
-            base = self.base_linear(self.base_activation()(x))
+            if self.skip_activation:
+                base = self.base_linear(x)
+            else:
+                base = self.base_linear(self.base_activation()(x))
             ret = ret + base
         return ret
 

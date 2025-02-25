@@ -5,6 +5,7 @@
         "tiny-imagenet-200",
         "svhn_data",
         "food101_data",
+        "caltech_data",
         "stl10_data",
         "**/*.jpg",
         "**/*.png",

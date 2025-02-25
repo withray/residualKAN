@@ -2,6 +2,7 @@ cifar_data/
 svhn_data/
 food_data/
 stl_data/
+caltech_data/
 imagenet-object-localization-challenge/
 tiny-imagenet-200/
 __pycache__/

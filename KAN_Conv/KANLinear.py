@@ -14,6 +14,7 @@ class KANLinear(torch.nn.Module):
         scale_spline = 1.0,
         enable_standalone_scale_spline = True,
         base_activation = torch.nn.SiLU,
+        skip_activation = True,
         grid_eps = 0.02,
         grid_range = [-1, 1],
         use_linear = True,
@@ -26,6 +27,7 @@ class KANLinear(torch.nn.Module):
         self.spline_order = spline_order
         self.use_linear = use_linear
         self.use_layernorm = use_layernorm
+        self.skip_activation = skip_activation
 
         h = (grid_range[1] - grid_range[0]) / grid_size
         grid = (
@@ -163,7 +165,10 @@ class KANLinear(torch.nn.Module):
             x = self.layernorm(x)
 
         if self.use_linear:
-            base_output = F.linear(self.base_activation(x), self.base_weight)
+            if self.skip_activation:
+                base_output = F.linear(x, self.base_weight)
+            else:
+                base_output = F.linear(self.base_activation(x), self.base_weight)
         else:
             base_output = 0
 
