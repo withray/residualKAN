@@ -6,32 +6,36 @@ class ChebyshevKANLinear(torch.nn.Module):
         self,
         in_features,
         out_features,
-        chebyshev_degree = 3,
-        enable_chebyshev_scaler = False,
+        polynomial_degree = 3,
+        enable_scaler = True,
         base_activation = torch.nn.SiLU,
         use_linear = True,
         skip_activation = True,
         normalization = "tanh",
-        use_legendre = False,
+        polynomial_type = "chebyshev",
         use_layernorm = False,
+        jacobi_alpha = 0.5,
+        jacobi_beta = 0.5,
     ):
         super(ChebyshevKANLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.chebyshev_degree = chebyshev_degree
+        self.polynomial_degree = polynomial_degree
         self.use_linear = use_linear
         self.skip_activation = skip_activation
         self.normalization = normalization
-        self.use_legendre = use_legendre
+        self.polynomial_type = polynomial_type
         self.use_layernorm = use_layernorm
+        self.jacobi_alpha = jacobi_alpha
+        self.jacobi_beta = jacobi_beta
 
         if self.use_linear:
             self.base_linear = torch.nn.Linear(in_features, out_features, bias = False)
-        self.chebyshev_weight = torch.nn.Parameter(torch.Tensor(out_features, in_features, chebyshev_degree + 1))
-        if enable_chebyshev_scaler:
-            self.chebyshev_scaler = torch.nn.Parameter(torch.Tensor(out_features, in_features))
+        self.polynomial_weight = torch.nn.Parameter(torch.Tensor(out_features, in_features, polynomial_degree + 1))
+        if enable_scaler:
+            self.scaler = torch.nn.Parameter(torch.Tensor(out_features, in_features))
 
-        self.enable_chebyshev_scaler = enable_chebyshev_scaler
+        self.enable_scaler = enable_scaler
         self.base_activation = base_activation()
 
         self.reset_parameters()
@@ -40,23 +44,38 @@ class ChebyshevKANLinear(torch.nn.Module):
 
     def reset_parameters(self):
         with torch.no_grad():
-            std_dev = 1.0 / math.sqrt(self.in_features * (self.chebyshev_degree + 1))
-            torch.nn.init.normal_(self.chebyshev_weight, mean = 0.0, std = std_dev)
+            std_dev = 1.0 / math.sqrt(self.in_features * (self.polynomial_degree + 1))
+            torch.nn.init.normal_(self.polynomial_weight, mean = 0.0, std = std_dev)
             if self.use_linear:
                 torch.nn.init.kaiming_normal_(self.base_linear.weight, nonlinearity = "relu")
-            if self.enable_chebyshev_scaler:
-                torch.nn.init.constant_(self.chebyshev_scaler, 1.0)
+            if self.enable_scaler:
+                torch.nn.init.constant_(self.scaler, 1.0)
 
     def chebyshev_polynomials(self, x):
         T = [torch.ones_like(x), x]
-        for _ in range(2, self.chebyshev_degree + 1):
+        for _ in range(2, self.polynomial_degree + 1):
             T.append(2 * x * T[-1] - T[-2])
         return torch.stack(T, dim = -1)
     
     def legendre_polynomials(self, x):
         T = [torch.ones_like(x), x]
-        for n in range(2, self.chebyshev_degree + 1):
+        for n in range(2, self.polynomial_degree + 1):
             T.append(((2 * (n - 1) + 1) * x * T[-1] - (n - 1) * T[-2]) / n)
+        return torch.stack(T, dim = -1)
+    
+    def jacobi_polynomials(self, x, alpha = 0.5, beta = 0.5):
+        T = [torch.ones_like(x), 0.5 * (alpha - beta + (alpha + beta + 2) * x)]
+        for n in range(2, self.polynomial_degree + 1):
+            A = (2 * n + alpha + beta - 1) * ((2 * n + alpha + beta) * (2 * n + alpha + beta - 2) * x + alpha ** 2 - beta ** 2)
+            B = 2 * (n + alpha - 1) * (n + beta - 1) * (2 * n + alpha + beta)
+            C = 2 * n * (n + alpha + beta) * (2 * n + alpha + beta - 2)
+            T.append((A * T[-1] - B * T[-2]) / C)
+        return torch.stack(T, dim = -1)
+    
+    def hermite_polynomials(self, x):
+        T = [torch.ones_like(x), 2 * x]
+        for n in range(2, self.polynomial_degree + 1):
+            T.append(2 * x * T[-1] - 2 * (n - 1) * T[-2])
         return torch.stack(T, dim = -1)
 
     def forward(self, x: torch.Tensor):
@@ -81,15 +100,21 @@ class ChebyshevKANLinear(torch.nn.Module):
         else:
             raise ValueError(f"Unsupported normalization method: {self.normalization}")
         
-        if self.use_legendre:
-            chebyshev_bases = self.legendre_polynomials(x_mapped)
+        if self.polynomial_type == "legendre":
+            polynomial_bases = self.legendre_polynomials(x_mapped)
+        elif self.polynomial_type == "chebyshev":
+            polynomial_bases = self.chebyshev_polynomials(x_mapped)
+        elif self.polynomial_type == "hermite":
+            polynomial_bases = self.hermite_polynomials(x_mapped)
+        elif self.polynomial_type == "jacobi":
+            polynomial_bases = self.jacobi_polynomials(x_mapped, alpha = self.jacobi_alpha, beta = self.jacobi_beta)
         else:
-            chebyshev_bases = self.chebyshev_polynomials(x_mapped)
+            raise ValueError(f"Unsupported polynomial type: {self.polynomial_type}")
 
-        if self.enable_chebyshev_scaler:
-            chebyshev_weight = self.chebyshev_weight * self.chebyshev_scaler.unsqueeze(-1)
+        if self.enable_scaler:
+            polynomial_weight = self.polynomial_weight * self.scaler.unsqueeze(-1)
         else:
-            chebyshev_weight = self.chebyshev_weight
-        chebyshev_output = torch.einsum('bic,oic->bo', chebyshev_bases, chebyshev_weight)
+            polynomial_weight = self.polynomial_weight
+        polynomial_output = torch.einsum('bic,oic->bo', polynomial_bases, polynomial_weight)
 
-        return base_output + chebyshev_output
+        return base_output + polynomial_output

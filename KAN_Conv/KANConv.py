@@ -26,6 +26,7 @@ class KAN_Convolutional_Layer(torch.nn.Module):
             grid_eps: float = 0.02,
             grid_range: tuple = (-1, 1),
             kan_type: str = "chebyshev",
+            normalization = "tanh",
             use_linear: bool = True,
             use_layernorm: bool = False,
             device: str = "cpu"
@@ -62,6 +63,7 @@ class KAN_Convolutional_Layer(torch.nn.Module):
                     grid_eps = grid_eps,
                     grid_range = grid_range,
                     kan_type = kan_type,
+                    normalization = normalization,
                     use_linear = use_linear,
                     use_layernorm = use_layernorm,
                     device = device
@@ -92,6 +94,7 @@ class KAN_Convolution(torch.nn.Module):
             grid_eps: float = 0.02,
             grid_range: tuple = (-1, 1),
             kan_type: str = "chebyshev",
+            normalization = "tanh",
             use_linear: bool = True,
             use_layernorm: bool = False,
             device = "cpu"
@@ -122,17 +125,17 @@ class KAN_Convolution(torch.nn.Module):
                 use_layernorm = use_layernorm
             )
 
-        elif kan_type == "chebyshev":
+        elif kan_type in ["chebyshev", "legendre", "jacobi", "hermite"]:
             self.conv = ChebyshevKANLinear(
                 in_features = math.prod(kernel_size),
                 out_features = 1,
-                chebyshev_degree = spline_order,
+                polynomial_degree = spline_order,
                 base_activation = base_activation,
                 skip_activation = skip_activation,
-                enable_chebyshev_scaler = weight_scaler,
+                enable_scaler = weight_scaler,
                 use_linear = use_linear,
-                normalization = "tanh",
-                use_legendre = False,
+                normalization = normalization,
+                polynomial_type = kan_type,
                 use_layernorm = use_layernorm
             )
 
@@ -154,7 +157,7 @@ class KAN_Convolution(torch.nn.Module):
             )
 
         else:
-            raise ValueError(f"Unsupported kan_type: {kan_type}. Choose from 'rbf', 'chebyshev', 'b_spline'.")
+            raise ValueError(f"Unsupported kan_type: {kan_type}.")
 
     def forward(self, x: torch.Tensor, update_grid = False):
         return convolution.kan_conv2d(x, self.conv, self.kernel_size[0], self.stride, self.dilation,self.padding, self.device)
