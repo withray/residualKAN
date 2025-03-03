@@ -79,9 +79,9 @@ It should be noted that the RKAN module performs exceptionally well on small and
 | RKAN-ResNet-152       | 80.73              | ResNet-152          | 80.22              |
 | RKAN-ResNet-101       | 80.09              | ResNet-101          | 79.31              |
 | RKAN-ResNet-50        | 77.93              | ResNet-50           | 77.21              |
-| RKAN-ResNet-34        | 74.28              | ResNet-34           | 73.72              |
+| RKAN-ResNet-34        | 74.33              | ResNet-34           | 73.72              |
 | RKAN-RegNetY-8GF      | 81.38              | RegNetY-8GF         | 81.02              |
-| RKAN-RegNetY-3.2GF    | 79.53              | RegNetY-3.2GF       | 79.03              |
+| RKAN-RegNetY-3.2GF    | 79.62              | RegNetY-3.2GF       | 79.03              |
 | RKAN-RegNetX-3.2GF    | 79.11              | RegNetX-3.2GF       | 78.70              |
 | RKAN-DenseNet-201     | 79.02              | DenseNet-201        | 78.41              |
 | RKAN-DenseNet-169     | 78.00              | DenseNet-169        | 77.25              |
