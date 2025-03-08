@@ -3,7 +3,7 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2410.05500-B31B1B)](https://arxiv.org/abs/2410.05500)
 
 ## Overview
-Despite their immense success, deep neural networks (CNNs) are costly to train, while modern architectures can retain hundreds of convolutional layers in network depth. Standard convolutional operations are fundamentally limited by their linear nature along with fixed activations, where multiple layers are needed to learn complex patterns, making this approach computationally inefficient and prone to optimization difficulties. As a result, we introduce RKAN (Stage Aggregated Residual Kolmogorov-Arnold Network), which could be easily implemented into stages of traditional networks, such as ResNet. The module also integrates polynomial feature transformation that provides the expressive power of many convolutional layers through learnable, non-linear feature refinement. Our proposed RKAN module offers consistent improvements over the base models on various well-known benchmark datasets, such as CIFAR-100, Food-101, and ImageNet.
+Despite their immense success, deep neural networks (CNNs) are costly to train, while modern architectures can retain hundreds of convolutional layers in network depth. Standard convolutional operations are fundamentally limited by their linear nature along with fixed activations, where multiple layers are needed to learn complex patterns, making this approach computationally inefficient and prone to optimization difficulties. As a result, we introduce RKAN (Residual Kolmogorov-Arnold Network), which could be easily implemented into stages of traditional networks, such as ResNet. The module also integrates polynomial feature transformation that provides the expressive power of many convolutional layers through learnable, non-linear feature refinement. Our proposed RKAN module offers consistent improvements over the base models on various well-known benchmark datasets, such as CIFAR-100, Food-101, and ImageNet.
 
 ![RKAN Multi-stages](images/rkan_multistages.png)
 
@@ -14,6 +14,24 @@ You can also find our paper on [arXiv](https://arxiv.org/abs/2410.05500).
 Networks are trained from scratch for 200 epochs using stochastic gradient descent (SGD) with a weight decay of 0.0005 (100 epochs on ImageNet with a weight decay of 0.0001). RandAugment, CutMix with a 50\% probability, and MixUp ($\alpha = 0.2$) with a 30\% probability are used as data augmentation. RKAN blocks are added primarily to the fourth stage of the network except for ConvNeXt and Swin where the block is implemented into the second stage.
 
 It should be noted that the RKAN module performs exceptionally well on small and datasets that are prone to overfitting. Multi-stage RKAN performs better when RKAN blocks are only implemented into the last 2 stages. More details can be found in our original paper. Performance gains for more recent architectures (ConvNeXt and Swin) are not yet observed on ImageNet.
+
+## Usage
+All necessary code is included in the repository to run RKAN with different backbone architectures on different datasets.
+1. Clone the repository or download the ZIP file
+2. Run the `training.ipynb` notebook 
+3. Key configuration parameters:
+   ```python
+   # Select dataset
+   dataset = "cifar_100"  # Options: cifar_100, cifar_10, svhn, tiny_imagenet, food_101, caltech_256, imagenet_1k
+   
+   # Select model
+   model_name = "resnet50"  # See model_configs for all supported models
+   
+   # RKAN configuration
+   reduce_factor = [2, 2, 2, 2]  # Reduce factors for each stage
+   mechanisms = ["addition", "addition", "addition", "addition"]  # Aggregation mechanism for each stage, input None to remove RKAN from the stage (added only to stage 4 by default)
+   kan_type = "chebyshev"  # Type of KAN convolutions, including chebyshev, rbf, b_spline, jacobi, hermite, etc.
+   
 
 ## Results
 ### CIFAR-100 Results
