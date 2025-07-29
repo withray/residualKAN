@@ -64,7 +64,7 @@ class EarlyStopping:
     def __call__(self, value, model):
         if self.monitor == "loss":
             score = -value
-        elif self.monitor == "accuracy":
+        elif self.monitor in ["accuracy", "mAP", "iou", "f1"]:
             score = value
         else:
             raise ValueError(f"Invalid monitor value '{self.monitor}'.")
@@ -83,7 +83,8 @@ class EarlyStopping:
 
     def save_checkpoint(self, model):
         if self.save_model:
-            torch.save(model, self.path)
+            # torch.save(model, self.path)
+            torch.save(model.state_dict(), self.path)
 
 def moving_average(data, window_size):
     return np.convolve(data, np.ones(window_size), "valid") / window_size
