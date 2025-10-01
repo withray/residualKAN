@@ -1,6 +1,6 @@
+import torch
 import torch.nn as nn
 import torchvision.models as models
-import torch
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 
 class RKAN_RegNet(nn.Module):
@@ -33,7 +33,7 @@ class RKAN_RegNet(nn.Module):
         }
         channels = layer_config[version]
 
-        # KAN convolutions for each layer
+        # KAN convolutions for each stage
         self.kan_conv1 = nn.ModuleList([
             KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (2, 2), padding = (1, 1), kan_type = kan_type, spline_order = 3)
             for i in range(len(channels))
@@ -77,7 +77,7 @@ class RKAN_RegNet(nn.Module):
             nn.ReLU(),
             nn.Conv2d(channels // reduction, channels, 1, bias = False),
             nn.Sigmoid()
-    )
+        )
 
     def apply_mechanism(self, out, residual, layer_index, mechanism):
         if mechanism == "addition":

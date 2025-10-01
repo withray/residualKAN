@@ -34,6 +34,8 @@ class ChebyshevKANLinear(torch.nn.Module):
         self.polynomial_weight = torch.nn.Parameter(torch.Tensor(out_features, in_features, polynomial_degree + 1))
         if enable_scaler:
             self.scaler = torch.nn.Parameter(torch.Tensor(out_features, in_features))
+        if self.normalization == "arctan":
+            self.arctan_scale = torch.nn.Parameter(torch.tensor(0.1)) 
 
         self.enable_scaler = enable_scaler
         self.base_activation = base_activation()
@@ -95,6 +97,8 @@ class ChebyshevKANLinear(torch.nn.Module):
             x_mapped = 2 * (x - x.min(dim = 1, keepdim = True)[0]) / (x.max(dim = 1, keepdim = True)[0] - x.min(dim = 1, keepdim = True)[0] + 1e-8) - 1
         elif self.normalization == "tanh":
             x_mapped = torch.tanh(x)
+        elif self.normalization == "arctan":
+            x_mapped = (2 / math.pi) * torch.atan((x - x.mean(dim = 1, keepdim = True)) * self.arctan_scale)
         elif self.normalization == "standardization":
             x_mapped = (x - x.mean(dim = 1, keepdim = True)) / (x.std(dim = 1, keepdim = True) + 1e-8)
         else:
@@ -115,6 +119,6 @@ class ChebyshevKANLinear(torch.nn.Module):
             polynomial_weight = self.polynomial_weight * self.scaler.unsqueeze(-1)
         else:
             polynomial_weight = self.polynomial_weight
-        polynomial_output = torch.einsum('bic,oic->bo', polynomial_bases, polynomial_weight)
+        polynomial_output = torch.einsum("bic,oic->bo", polynomial_bases, polynomial_weight)
 
         return base_output + polynomial_output

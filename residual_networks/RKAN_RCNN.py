@@ -1,15 +1,15 @@
 import torch.nn as nn
 import torchvision.models as models
-from torchvision.models.detection import FasterRCNN
+from torchvision.models.detection import FasterRCNN, MaskRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.backbone_utils import BackboneWithFPN
-from residual_networks.RKAN_ResNet import RKAN_ResNet
+from residual_networks.RKAN_ResNet import RKANet
 from residual_networks.RKAN_DenseNet import RKAN_DenseNet
 
-class RKAN_FasterRCNN(nn.Module):
-    def __init__(self, num_classes, backbone_name = "resnet50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2], 
-                 mechanisms = [None, None, None, "addition"], input_size = 600, shortcut = False):
-        super(RKAN_FasterRCNN, self).__init__()
+class RKAN_RCNN(nn.Module):
+    def __init__(self, num_classes, backbone_name = "resnet50", kan_type = "chebyshev", detector_type = "faster", pretrained = False, n_convs = 1,
+                 reduce_factor = [2, 2, 2, 2], mechanisms = [None, None, None, "addition"], input_size = 600, shortcut = False):
+        super(RKAN_RCNN, self).__init__()
         
         if backbone_name.startswith("resnet"):
             if backbone_name == "resnet18":
@@ -25,8 +25,8 @@ class RKAN_FasterRCNN(nn.Module):
             
             setattr(base_model, "fc", nn.Identity())
             setattr(base_model, "avgpool", nn.Identity())
-            
-            self.rkan_components = RKAN_ResNet(num_classes = 1000, version = backbone_name, kan_type = kan_type, pretrained = False, n_convs = n_convs,
+            self.detector_type = detector_type
+            self.rkan_components = RKANet(num_classes = 1000, version = backbone_name, kan_type = kan_type, pretrained = False, n_convs = n_convs,
                                             reduce_factor = reduce_factor, mechanisms = mechanisms, shortcut = shortcut)
             
             # Wrapper layers that include KAN
@@ -62,7 +62,7 @@ class RKAN_FasterRCNN(nn.Module):
                 raise ValueError(f"Unsupported backbone: {backbone_name}")
             
             setattr(base_model, "classifier", nn.Identity())
-            
+            self.detector_type = detector_type
             self.rkan_components = RKAN_DenseNet(num_classes = 1000, version = backbone_name, kan_type = kan_type, pretrained = False, n_convs = n_convs,
                                                  reduce_factor = reduce_factor, mechanisms = mechanisms)
             
@@ -125,8 +125,13 @@ class RKAN_FasterRCNN(nn.Module):
 
         self.backbone_with_fpn = BackboneWithFPN(backbone, return_layers = return_layers, in_channels_list = in_channels_list, out_channels = 256)
         anchor_generator = AnchorGenerator(sizes = ((32, 64, 128, 256, 512),) * 5, aspect_ratios = ((0.5, 1.0, 2.0),) * 5)
-        self.model = FasterRCNN(self.backbone_with_fpn, num_classes = num_classes, rpn_anchor_generator = anchor_generator, min_size = input_size, max_size = int(input_size * 1.666))
-    
+        if detector_type == "faster":
+            self.model = FasterRCNN(self.backbone_with_fpn, num_classes = num_classes, rpn_anchor_generator = anchor_generator, min_size = input_size, max_size = int(input_size * 1.666))
+        elif detector_type == "mask":
+            self.model = MaskRCNN(self.backbone_with_fpn, num_classes = num_classes, rpn_anchor_generator = anchor_generator, min_size = input_size, max_size = int(input_size * 1.666))
+        else:
+            raise ValueError(f"Unsupported detector type: {detector_type}.")
+        
     def _make_resnet_kan_layer(self, layer, layer_idx):
         rkan = self.rkan_components
         

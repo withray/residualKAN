@@ -1,5 +1,6 @@
 from torch.utils.data import Dataset
 import torchvision.models as models
+import torch
 import torch.nn as nn
 from PIL import Image
 import os
@@ -68,3 +69,20 @@ def load_model(model_name, num_classes, pretrained = False, device = "cpu"):
         raise ValueError(f"Unknown model '{model_name}' classification layer.")
     model = model.to(device)
     return model
+
+def load_weights(model, checkpoint_path, device):
+    checkpoint = torch.load(checkpoint_path, map_location = device)
+    backbone_state_dict = model.backbone.state_dict()
+    classification_patterns = ["fc.", "classifier.", "head.", "linear."]
+    matching_weights = {}
+    skipped_weights = []
+    for k, v in checkpoint.items():
+        if any(pattern in k for pattern in classification_patterns):
+            skipped_weights.append(k)
+            continue
+        if k in backbone_state_dict and backbone_state_dict[k].shape == v.shape:
+            matching_weights[k] = v
+
+    print(f"Skipped weights: {skipped_weights}.")
+    model.backbone.load_state_dict(matching_weights, strict = False)
+    return len(matching_weights)

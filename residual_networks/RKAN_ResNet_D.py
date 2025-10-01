@@ -3,32 +3,53 @@ import torch.nn as nn
 import torchvision.models as models
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 
-class RKANet(nn.Module):
-    def __init__(self, num_classes = 1000, version = "resnet50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
+class RKANet_D(nn.Module):
+    def __init__(self, num_classes = 1000, version = "resnetd50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
                  mechanisms = [None, None, None, "addition"], shortcut = False):
-        super(RKANet, self).__init__()
+        super(RKANet_D, self).__init__()
 
         self.mechanisms = mechanisms
         self.reduce_factor = reduce_factor
         self.shortcut = shortcut
-        
-        if pretrained:
-            self.resnet = getattr(models, version)(weights = "DEFAULT")
-        else:
-            self.resnet = getattr(models, version)(weights = None)
 
         if len(self.mechanisms) != 4:
             raise ValueError(f"Length of mechanisms ({len(self.mechanisms)}) must match the number of stages (4).")
+        
+        version_mapping = {f"resnetd{i}": f"resnet{i}" for i in [50, 101, 152]}
+        backbone_version = version_mapping.get(version, version)
 
-        self.resnet.fc = nn.Linear(self.resnet.fc.in_features, num_classes)
+        if pretrained:
+            base_resnet = getattr(models, backbone_version)(weights = "DEFAULT")
+        else:
+            base_resnet = getattr(models, backbone_version)(weights = None)
+
+        # Three 3x3 convs instead of one 7x7
+        self.stem = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size = 3, stride = 2, padding = 1, bias = False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace = True),
+            nn.Conv2d(32, 32, kernel_size = 3, stride = 1, padding = 1, bias = False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace = True),
+            nn.Conv2d(32, 64, kernel_size = 3, stride = 1, padding = 1, bias = False),
+        )
+        
+        self.bn1 = base_resnet.bn1
+        self.relu = base_resnet.relu
+        self.maxpool = base_resnet.maxpool
+        self.layer1 = self._make_resnetd_layer(base_resnet.layer1)
+        self.layer2 = self._make_resnetd_layer(base_resnet.layer2)
+        self.layer3 = self._make_resnetd_layer(base_resnet.layer3)
+        self.layer4 = self._make_resnetd_layer(base_resnet.layer4)
+
+        self.avgpool = base_resnet.avgpool
+        self.fc = nn.Linear(base_resnet.fc.in_features, num_classes)
         layer_config = {
-            "resnet18": [64, 128, 256, 512],
-            "resnet34": [64, 128, 256, 512],
             "resnet50": [256, 512, 1024, 2048],
             "resnet101": [256, 512, 1024, 2048],
             "resnet152": [256, 512, 1024, 2048]
         }
-        channels = layer_config[version]
+        channels = layer_config[backbone_version]
 
         # KAN convolutions for each stage
         self.kan_conv1 = nn.ModuleList([
@@ -77,6 +98,26 @@ class RKANet(nn.Module):
         # Residual mechanisms
         self.gate_convs = nn.ModuleList([nn.Conv2d(ch, ch, kernel_size = 1) for ch in channels])
         self.se_blocks = nn.ModuleList([self._make_se_block(ch, reduction = 16) for ch in channels])
+    
+    def _make_resnetd_layer(self, layer):
+        for block in layer:
+            if hasattr(block, "downsample") and block.downsample is not None:
+                original_downsample = block.downsample
+                if len(original_downsample) >= 2:
+                    conv = original_downsample[0]
+                    bn = original_downsample[1]
+                    if conv.stride[0] == 2:
+                        block.downsample = nn.Sequential(
+                            nn.AvgPool2d(kernel_size = 2, stride = 2, padding = 0),
+                            nn.Conv2d(conv.in_channels, conv.out_channels, kernel_size = 1, stride = 1, bias = False),
+                            bn
+                        )
+
+            if hasattr(block, "conv1") and hasattr(block, "conv2"):
+                if block.conv1.stride == (2, 2):
+                    block.conv1.stride = (1, 1)
+                    block.conv2.stride = (2, 2)
+        return layer
 
     def _make_se_block(self, channels, reduction = 16):
         return nn.Sequential(
@@ -87,7 +128,7 @@ class RKANet(nn.Module):
             nn.Sigmoid()
         )
     
-    def apply_mechanism(self, out, residual, layer_index, mechanism):       
+    def apply_mechanism(self, out, residual, layer_index, mechanism):
         if mechanism == "addition":
             return out + residual
         
@@ -103,12 +144,12 @@ class RKANet(nn.Module):
             raise ValueError(f"Invalid mechanism: {mechanism}.")
 
     def forward(self, x):
-        out = self.resnet.conv1(x)
-        out = self.resnet.bn1(out)
-        out = self.resnet.relu(out)
-        out = self.resnet.maxpool(out)
+        out = self.stem(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.maxpool(out)
         
-        layers = [self.resnet.layer1, self.resnet.layer2, self.resnet.layer3, self.resnet.layer4]
+        layers = [self.layer1, self.layer2, self.layer3, self.layer4]
         for i, (layer, mechanism) in enumerate(zip(layers, self.mechanisms)):
             identity = out
             out = layer(out)
@@ -133,7 +174,7 @@ class RKANet(nn.Module):
                     residual = residual + shortcut
                 out = self.apply_mechanism(out, residual, i, mechanism)
 
-        out = self.resnet.avgpool(out)
+        out = self.avgpool(out)
         out = torch.flatten(out, 1)
-        out = self.resnet.fc(out)
+        out = self.fc(out)
         return out

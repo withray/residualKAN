@@ -2,25 +2,111 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
+from torchvision.models.resnet import BasicBlock, Bottleneck
 
-class RKANet(nn.Module):
-    def __init__(self, num_classes = 1000, version = "resnet50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
+class SqueezeExcitation(nn.Module):
+    def __init__(self, channels):
+        super(SqueezeExcitation, self).__init__()
+        reduction = 16
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc1 = nn.Conv2d(channels, channels // reduction, kernel_size = 1, bias = False)
+        self.relu = nn.ReLU(inplace = True)
+        self.fc2 = nn.Conv2d(channels // reduction, channels, kernel_size = 1, bias = False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        y = self.avg_pool(x)
+        y = self.fc1(y)
+        y = self.relu(y)
+        y = self.fc2(y)
+        y = self.sigmoid(y)
+        return x * y
+
+class SEBasicBlock(BasicBlock):
+    def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None):
+        super(SEBasicBlock, self).__init__(
+            inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
+            groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
+        )
+        self.se = SqueezeExcitation(planes)
+
+    def forward(self, x):
+        identity = x
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.se(out)
+        if self.downsample is not None:
+            identity = self.downsample(x)
+        out += identity
+        out = self.relu(out)
+        return out
+
+class SEBottleneck(Bottleneck):
+    def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None):
+        super(SEBottleneck, self).__init__(
+            inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
+            groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
+        )
+        self.se = SqueezeExcitation(planes * self.expansion)
+
+    def forward(self, x):
+        identity = x
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu(out)
+        out = self.conv3(out)
+        out = self.bn3(out)
+        out = self.se(out)
+        if self.downsample is not None:
+            identity = self.downsample(x)
+        out += identity
+        out = self.relu(out)
+        return out
+
+class RKAN_SENet(nn.Module):
+    def __init__(self, num_classes = 1000, version = "senet50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
                  mechanisms = [None, None, None, "addition"], shortcut = False):
-        super(RKANet, self).__init__()
+        super(RKAN_SENet, self).__init__()
 
         self.mechanisms = mechanisms
         self.reduce_factor = reduce_factor
         self.shortcut = shortcut
-        
-        if pretrained:
-            self.resnet = getattr(models, version)(weights = "DEFAULT")
-        else:
-            self.resnet = getattr(models, version)(weights = None)
 
         if len(self.mechanisms) != 4:
             raise ValueError(f"Length of mechanisms ({len(self.mechanisms)}) must match the number of stages (4).")
+        
+        version_mapping = {f"senet{i}": f"resnet{i}" for i in [18, 34, 50, 101, 152]}
+        backbone_version = version_mapping.get(version, version)
 
+        if pretrained:
+            self.resnet = getattr(models, backbone_version)(weights = "DEFAULT")
+        else:
+            self.resnet = getattr(models, backbone_version)(weights = None)
+
+        block_map = {
+            "resnet18": (SEBasicBlock, [2, 2, 2, 2]),
+            "resnet34": (SEBasicBlock, [3, 4, 6, 3]),
+            "resnet50": (SEBottleneck, [3, 4, 6, 3]),
+            "resnet101": (SEBottleneck, [3, 4, 23, 3]),
+            "resnet152": (SEBottleneck, [3, 8, 36, 3])
+        }
+
+        if backbone_version not in block_map:
+            raise ValueError(f"Unsupported version: {backbone_version}. Supported: {list(block_map.keys())}.")
+                
+        block, layers = block_map[backbone_version]
+        self.resnet.layer1 = self._replace_blocks(self.resnet.layer1, block)
+        self.resnet.layer2 = self._replace_blocks(self.resnet.layer2, block)
+        self.resnet.layer3 = self._replace_blocks(self.resnet.layer3, block)
+        self.resnet.layer4 = self._replace_blocks(self.resnet.layer4, block)
         self.resnet.fc = nn.Linear(self.resnet.fc.in_features, num_classes)
+
         layer_config = {
             "resnet18": [64, 128, 256, 512],
             "resnet34": [64, 128, 256, 512],
@@ -28,7 +114,7 @@ class RKANet(nn.Module):
             "resnet101": [256, 512, 1024, 2048],
             "resnet152": [256, 512, 1024, 2048]
         }
-        channels = layer_config[version]
+        channels = layer_config[backbone_version]
 
         # KAN convolutions for each stage
         self.kan_conv1 = nn.ModuleList([
@@ -86,7 +172,29 @@ class RKANet(nn.Module):
             nn.Conv2d(channels // reduction, channels, 1, bias = False),
             nn.Sigmoid()
         )
-    
+
+    def _replace_blocks(self, layer, block):
+        new_blocks = []
+        for module in layer:
+            if isinstance(module, (BasicBlock, Bottleneck)):
+                inplanes = module.conv1.in_channels
+                planes = module.conv1.out_channels
+                stride = module.stride
+                downsample = module.downsample
+                groups = getattr(module, "groups", 1)
+                base_width = getattr(module, "base_width", 64)
+                dilation = getattr(module, "dilation", 1)
+                norm_layer = type(module.bn1)
+                
+                new_block = block(
+                    inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
+                    groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
+                )
+                new_blocks.append(new_block)
+            else:
+                new_blocks.append(module)
+        return nn.Sequential(*new_blocks)
+
     def apply_mechanism(self, out, residual, layer_index, mechanism):       
         if mechanism == "addition":
             return out + residual
@@ -116,7 +224,7 @@ class RKANet(nn.Module):
             if mechanism is not None:
                 residual = self.conv_reduce[i](identity)
                 residual = self.silu(residual)
-                
+
                 residual = self.kan_conv1[i](residual)
                 residual = self.kan_bn[i](residual)
 

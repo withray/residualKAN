@@ -1,12 +1,12 @@
+import torch
 import torch.nn as nn
 import torchvision.models as models
-import torch
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 
-class RKAN_ResNeXt(nn.Module):
+class RKANeXt(nn.Module):
     def __init__(self, num_classes = 1000, version = "resnext50_32x4d", kan_type = "chebyshev", pretrained = False, reduce_factor = [2, 2, 2, 2],
                  n_convs = 1, mechanisms = [None, None, None, "addition"]):
-        super(RKAN_ResNeXt, self).__init__()
+        super(RKANeXt, self).__init__()
 
         self.mechanisms = mechanisms
         self.reduce_factor = reduce_factor
@@ -26,7 +26,7 @@ class RKAN_ResNeXt(nn.Module):
         }
         channels = layer_config[version]
 
-        # KAN convolutions for each layer
+        # KAN convolutions for each stage
         self.kan_conv1 = nn.ModuleList([
             KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (1, 1) if i == 0 else (2, 2), padding = (1, 1), kan_type = kan_type, spline_order = 3)
             for i in range(len(channels))
@@ -70,7 +70,7 @@ class RKAN_ResNeXt(nn.Module):
             nn.ReLU(),
             nn.Conv2d(channels // reduction, channels, 1),
             nn.Sigmoid()
-    )
+        )
     
     def apply_mechanism(self, out, residual, layer_index, mechanism):
         if mechanism == "addition":
