@@ -3,7 +3,7 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2410.05500-B31B1B)](https://arxiv.org/abs/2410.05500)
 
 ## Overview
-Despite their immense success, deep neural networks (CNNs) are costly to train due to hundreds of convolutional layers within network depth. Standard convolutional operations are fundamentally limited by their linear nature along with fixed activations, where at least dozens of layers are needed to learn meaningful patterns in data, making this approach prone to optimization difficulties and computationally inefficient. As a result, we introduce RKAN (Residual Kolmogorov-Arnold Network), which can be conveniently added into each stage (level) of traditional deep networks and integrates mutually complementary polynomial feature transformation to existing convolutional layers. Our proposed module offers consistent improvements in different vision tasks over baseline models on most common benchmark datasets, such as CIFAR-100, ImageNet, and Pascal VOC.
+Despite their immense success, deep convolutional neural networks (CNNs) can be difficult to optimize and costly to train due to hundreds of layers within the network depth. Conventional convolutional operations are fundamentally limited by their linear nature along with fixed activations, where many layers are needed to learn meaningful patterns in data. Because of the sheer size of these networks, this approach is simply computationally inefficient, and poses overfitting or gradient vanishing risks, especially in small datasets. As a result, we introduce a ``plug-in" module, called Residual Kolmogorov-Arnold Network (RKAN). Our module is highly compact, so it can be easily added into any stage (level) of traditional deep networks, where it learns to integrate supportive polynomial feature transformations to existing convolutional frameworks. RKAN offers consistent improvements over baseline models in different vision tasks and widely tested benchmarks, accomplishing cutting-edge performance on small-scale datasets.
 
 ![RKAN Multi-stages](images/rkan_multistages.png)
 
@@ -11,9 +11,9 @@ Despite their immense success, deep neural networks (CNNs) are costly to train d
 
 You can also find our paper on [arXiv](https://arxiv.org/abs/2410.05500).
 
-Networks are trained from scratch for 200 epochs using stochastic gradient descent (SGD) with a weight decay of 0.0005 (100 epochs on ImageNet with a weight decay of 0.0001). RandAugment, CutMix with a 50\% probability, and MixUp ($\alpha = 0.2$) with a 30\% probability are used as data augmentation. RKAN blocks are added primarily to the fourth stage of the network except for ConvNeXt and Swin where the block is implemented into the second stage.
+Networks are trained from scratch for 200 epochs using stochastic gradient descent (SGD) with a weight decay of 0.0005 (100 epochs on ImageNet with a weight decay of 0.0001). RandAugment, CutMix with a 50\% probability, and MixUp ($\alpha = 0.2$) with a 30\% probability are used as data augmentation. RKAN blocks are added to the last stage of the network. ResNet is set to the default backbone, where RKAN-ResNet-101 is shortened as RKANet-101.
 
-It should be noted that the RKAN module performs exceptionally well on small and datasets that are prone to overfitting. Multi-stage RKAN performs better when RKAN blocks are only implemented into the last 2 stages. More details can be found in our original paper. Performance gains for more recent architectures (ConvNeXt and Swin) are not yet observed on ImageNet.
+It should be noted that the RKAN module performs better on small datasets that are prone to overfitting than larger datasets, such as ImageNet or COCO. Multi-stage RKAN performs better when RKAN blocks are only implemented into the last 2 stages. More details can be found in our original paper.
 
 ## Usage
 All necessary code is included in the repository to run RKAN with different backbone architectures on different datasets.
@@ -37,32 +37,19 @@ All necessary code is included in the repository to run RKAN with different back
 ### CIFAR-100 Results
 | RKAN Model            | Top-1 Accuracy     | Base Model          | Top-1 Accuracy     |
 |-----------------------|--------------------|---------------------|--------------------|
-| RKAN-ResNeXt-101      | 86.15              | ResNeXt-101         | 85.28              |
-| RKAN-ResNeXt-50       | 85.08              | ResNeXt-50          | 84.40              |
-| RKAN-ResNet-152       | 85.40              | ResNet-152          | 84.63              |
-| RKAN-ResNet-101       | 85.12              | ResNet-101          | 84.00              |
-| RKAN-ResNet-50        | 84.56              | ResNet-50           | 84.12              |
+| RKAN-PyramidNet-200   | 86.35              | PyramidNet-200      | 85.62              |
+| RKANeXt-101           | 86.15              | ResNeXt-101         | 85.28              |
+| RKANeSt-101           | 85.52              | ResNeSt-101         | 84.47              |
+| RKAN-SENet-101        | 85.39              | SENet-101           | 84.36              |
+| RKANet-152            | 85.40              | ResNet-152          | 84.63              |
+| RKANet-101-D          | 86.07              | ResNet-101-D        | 85.09              |
+| RKANet-101            | 85.12              | ResNet-101          | 84.00              |
 | RKAN-RegNetY-32GF     | 87.03              | RegNetY-32GF        | 85.44              |
 | RKAN-RegNetY-8GF      | 86.11              | RegNetY-8GF         | 84.77              |
 | RKAN-RegNetY-3.2GF    | 85.46              | RegNetY-3.2GF       | 84.68              |
 | RKAN-DenseNet-201     | 85.35              | DenseNet-201        | 84.28              |
 | RKAN-DenseNet-169     | 84.84              | DenseNet-169        | 84.00              |
 | RKAN-DenseNet-121     | 84.73              | DenseNet-121        | 84.09              |
-
-### Food-101 Results
-| RKAN Model            | Top-1 Accuracy     | Base Model          | Top-1 Accuracy     |
-|-----------------------|--------------------|---------------------|--------------------|
-| RKAN-ResNeXt-101      | 90.82              | ResNeXt-101         | 89.87              |
-| RKAN-ResNeXt-50       | 90.00              | ResNeXt-50          | 89.20              |
-| RKAN-ResNet-152       | 90.36              | ResNet-152          | 89.70              |
-| RKAN-ResNet-101       | 90.09              | ResNet-101          | 89.29              |
-| RKAN-ResNet-50        | 89.48              | ResNet-50           | 88.84              |
-| RKAN-RegNetY-32GF     | 91.62              | RegNetY-32GF        | 90.72              |
-| RKAN-RegNetY-8GF      | 91.17              | RegNetY-8GF         | 90.43              |
-| RKAN-RegNetY-3.2GF    | 90.09              | RegNetY-3.2GF       | 89.54              |
-| RKAN-DenseNet-201     | 89.58              | DenseNet-201        | 88.83              |
-| RKAN-DenseNet-169     | 89.74              | DenseNet-169        | 89.17              |
-| RKAN-DenseNet-121     | 89.43              | DenseNet-121        | 88.98              |
 
 ### Tiny ImageNet Results
 
@@ -88,8 +75,6 @@ All necessary code is included in the repository to run RKAN with different back
 | RKAN-DenseNet-201     | 75.12              | DenseNet-201        | 73.10              |
 | RKAN-DenseNet-169     | 74.88              | DenseNet-169        | 73.55              |
 | RKAN-DenseNet-121     | 74.13              | DenseNet-121        | 72.76              |
-| RKAN-ConvNeXt-T       | 72.07              | ConvNeXt-T          | 70.78              |
-| RKAN-Swin-T           | 68.48              | Swin-T              | 67.05              |
 
 ### ImageNet Results
 | RKAN Model            | Top-1 Accuracy     | Base Model          | Top-1 Accuracy     |
