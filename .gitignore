@@ -6,6 +6,7 @@ caltech_data/
 imagenet-object-localization-challenge/
 tiny-imagenet-200/
 voc_data/
+logs/
 __pycache__/
 *.pyc
 *.pt
