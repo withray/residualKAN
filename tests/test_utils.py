@@ -1,57 +1,13 @@
 from thop import profile
 from contextlib import redirect_stdout
 import io
+import sys
 import torch
 import torch.nn as nn
 import numpy as np
 
-class SEBlock(nn.Module):
-    def __init__(self, channels, reduction = 16, pool = "avg", gate = "sigmoid"):
-        super(SEBlock, self).__init__()
-        self.pool = pool
-        self.gate = gate
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
-        self.fc_avg = nn.Sequential(
-            nn.Conv2d(channels, channels // reduction, 1, bias = False),
-            nn.ReLU(),
-            nn.Conv2d(channels // reduction, channels, 1, bias = False),
-        )
-        self.fc_max = nn.Sequential(
-            nn.Conv2d(channels, channels // reduction, 1, bias = False),
-            nn.ReLU(),
-            nn.Conv2d(channels // reduction, channels, 1, bias = False),
-        )
-        self.sigmoid = nn.Sigmoid()
-        self.tanh = nn.Tanh()
-        self.softsign = nn.Softsign()
-
-    def forward(self, x):
-        if self.pool == "avg":
-            pooled = self.avg_pool(x)
-            out = self.fc_avg(pooled)
-        elif self.pool == "max":
-            pooled = self.max_pool(x)
-            out = self.fc_max(pooled)
-        elif self.pool == "both":
-            avg_out = self.fc_avg(self.avg_pool(x))
-            max_out = self.fc_max(self.max_pool(x))
-            out = avg_out + max_out
-        else:
-            raise ValueError(f"Invalid pool type: {self.pool}. Choose from 'avg', 'max', or 'both'.")
-        
-        if self.gate == "sigmoid":
-            out = self.sigmoid(out)
-        elif self.gate == "tanh":
-            out = self.tanh(out)
-        elif self.gate == "softsign":
-            out = self.softsign(out)
-        else:
-            raise ValueError(f"Invalid gate type: {self.gate}. Choose from 'sigmoid', 'tanh', or 'softsign'.")
-        return x * out
-
 class EarlyStopping:
-    def __init__(self, patience = 100, min_delta = 0, monitor = "loss", path = "best.pt", save_model = True):
+    def __init__(self, patience = 100, min_delta = 0, monitor = "loss", path = "best.pt", save_model = False):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
@@ -85,6 +41,25 @@ class EarlyStopping:
         if self.save_model:
             # torch.save(model, self.path)
             torch.save(model.state_dict(), self.path)
+
+class Logger:
+    def __init__(self, filename):
+        self.terminal = sys.stdout
+        self.log = open(filename, "w")
+    
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()
+    
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+def stop_logging():
+    if hasattr(sys.stdout, "terminal"):
+        original_stdout = getattr(sys.stdout, "terminal")
+        sys.stdout = original_stdout
 
 def moving_average(data, window_size):
     return np.convolve(data, np.ones(window_size), "valid") / window_size
