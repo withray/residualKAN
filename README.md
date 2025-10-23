@@ -78,14 +78,24 @@ All necessary code is included in the repository to run RKAN with different back
 | RKANet-50-2&times;L*  | 78.65              | 780                 | 31.86M             |
 | RKANet-50*            | 78.02              | 943                 | 27.14M             |
 | ResNet-50             | 77.15              | 1,216               | 25.56M             |
+|                       |                    |                     |                    |
+| RKAN-ELA-L-50*        | 78.92              | 505                 | 27.98M             |
+| ELA-L-50              | 78.23              | 578                 | 26.40M             |
+| RKAN-SENet-50*        | 78.66              | 779                 | 29.65M             |
+| SENet-50              | 77.68              | 965                 | 28.07M             |
+| RKAN-DenseNet-169*    | 78.00              | 770                 | 14.89M             |
+| DenseNet-169          | 77.25              | 843                 | 14.15M             |
+
 
 ### MS COCO 2017 (640 pixels on shorter side) Results
 | Model                 | AP<sup>bbox</sup>  | AP<sup>bbox</sup><sub>50</sub> | AP<sup>mask</sup>   | AP<sup>mask</sup><sub>50</sub> | FPS                |
 |-----------------------|:------------------:|:------------------------------:|:-------------------:|:------------------------------:|:------------------:|
-| RKAN-SENet-50*        | 36.35              | 54.48                          | 32.37               | 51.64                          | 82.4               |
 | RKANet-50-2&times;L*  | 36.13              | 54.30                          | 32.29               | 51.38                          | 97.2               |
 | RKANet-50*            | 35.92              | 54.21                          | 32.16               | 51.20                          | 105.5              |
 | ResNet-50             | 35.59              | 53.58                          | 31.94               | 50.79                          | 118.2              |
+|                       |                    |                                |                     |                                |                    |
+| RKAN-SENet-50*        | 36.35              | 54.48                          | 32.37               | 51.64                          | 82.4               |
+| SENet-50              | 35.94              | 54.10                          | 32.14               | 51.13                          | 90.0               |
 
 ### Citation
 If you find our work useful, consider citing our paper at:
