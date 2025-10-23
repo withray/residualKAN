@@ -1,5 +1,6 @@
+import os
+import torch
 import torch.nn as nn
-import torchvision.models as models
 from torchvision.models.detection import FasterRCNN, MaskRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.backbone_utils import BackboneWithFPN
@@ -7,28 +8,29 @@ from residual_networks.RKAN_ResNet import RKANet
 from residual_networks.RKAN_DenseNet import RKAN_DenseNet
 
 class RKAN_RCNN(nn.Module):
-    def __init__(self, num_classes, backbone_name = "resnet50", kan_type = "chebyshev", detector_type = "faster", pretrained = False, n_convs = 1,
-                 reduce_factor = [2, 2, 2, 2], mechanisms = [None, None, None, "addition"], input_size = 600, shortcut = False):
+    def __init__(self, num_classes, backbone_name = "resnet50", kan_type = "chebyshev", detector_type = "faster", pretrained = False, n_convs = 1, spline_order = (3, 2),
+                 grid_size = (3, 2), reduce_factor = [2, 2, 2, 2], mechanisms = [None, None, None, "addition"], input_size = 640, shortcut = False, weights_path = None,
+                 inv_bottleneck = False, inv_factor = 4):
         super(RKAN_RCNN, self).__init__()
         
         if backbone_name.startswith("resnet"):
-            if backbone_name == "resnet18":
-                base_model = models.resnet18(weights = "DEFAULT" if pretrained else None)
-            elif backbone_name == "resnet34":
-                base_model = models.resnet34(weights = "DEFAULT" if pretrained else None)
-            elif backbone_name == "resnet50":
-                base_model = models.resnet50(weights = "DEFAULT" if pretrained else None)
-            elif backbone_name == "resnet101":
-                base_model = models.resnet101(weights = "DEFAULT" if pretrained else None)
-            else:
-                raise ValueError(f"Unsupported backbone: {backbone_name}")
+            if backbone_name not in ["resnet18", "resnet34", "resnet50", "resnet101", "resnet152"]:
+                raise ValueError(f"Unsupported backbone: {backbone_name}.")
             
-            setattr(base_model, "fc", nn.Identity())
-            setattr(base_model, "avgpool", nn.Identity())
             self.detector_type = detector_type
-            self.rkan_components = RKANet(num_classes = 1000, version = backbone_name, kan_type = kan_type, pretrained = False, n_convs = n_convs,
-                                            reduce_factor = reduce_factor, mechanisms = mechanisms, shortcut = shortcut)
-            
+            self.rkan_components = RKANet(num_classes = 1000, version = backbone_name, kan_type = kan_type, pretrained = pretrained, n_convs = n_convs, reduce_factor = reduce_factor,
+                                          mechanisms = mechanisms, spline_order = spline_order, grid_size = grid_size, inv_bottleneck = inv_bottleneck, inv_factor = inv_factor, shortcut = shortcut)
+            if weights_path and os.path.exists(weights_path):
+                checkpoint = torch.load(weights_path)
+                backbone_weights = {k: v for k, v in checkpoint.items() if not any(p in k for p in ["fc.", "classifier.", "head."])}
+                missing, unexpected = self.rkan_components.load_state_dict(backbone_weights, strict = False)
+                print(f"Loaded {len(backbone_weights)} weights.")
+                if missing:
+                    print(f"Missing in model: {len(missing)}, Missing keys: {missing}")
+                if unexpected:
+                    print(f"Unexpected in checkpoint: {len(unexpected)}, Unexpected keys: {unexpected}")
+            base_model = self.rkan_components.resnet
+
             # Wrapper layers that include KAN
             self.stage1_kan = self._make_resnet_kan_layer(base_model.layer1, 0)
             self.stage2_kan = self._make_resnet_kan_layer(base_model.layer2, 1)
@@ -50,22 +52,23 @@ class RKAN_RCNN(nn.Module):
             backbone = base_model
 
         elif backbone_name.startswith("densenet"):
-            if backbone_name == "densenet121":
-                base_model = models.densenet121(weights = "DEFAULT" if pretrained else None)
-            elif backbone_name == "densenet169":
-                base_model = models.densenet169(weights = "DEFAULT" if pretrained else None)
-            elif backbone_name == "densenet201":
-                base_model = models.densenet201(weights = "DEFAULT" if pretrained else None)
-            elif backbone_name == "densenet161":
-                base_model = models.densenet161(weights = "DEFAULT" if pretrained else None)
-            else:
-                raise ValueError(f"Unsupported backbone: {backbone_name}")
+            if backbone_name not in ["densenet121", "densenet169", "densenet201", "densenet161"]:
+                raise ValueError(f"Unsupported backbone: {backbone_name}.")
             
-            setattr(base_model, "classifier", nn.Identity())
             self.detector_type = detector_type
-            self.rkan_components = RKAN_DenseNet(num_classes = 1000, version = backbone_name, kan_type = kan_type, pretrained = False, n_convs = n_convs,
-                                                 reduce_factor = reduce_factor, mechanisms = mechanisms)
-            
+            self.rkan_components = RKAN_DenseNet(num_classes = 1000, version = backbone_name, kan_type = kan_type, pretrained = pretrained, n_convs = n_convs,
+                                                 reduce_factor = reduce_factor, mechanisms = mechanisms, spline_order = spline_order, grid_size = grid_size, inv_bottleneck = inv_bottleneck, inv_factor = inv_factor)
+            if weights_path and os.path.exists(weights_path):
+                checkpoint = torch.load(weights_path)
+                backbone_weights = {k: v for k, v in checkpoint.items() if not any(p in k for p in ["fc.", "classifier.", "head."])}
+                missing, unexpected = self.rkan_components.load_state_dict(backbone_weights, strict = False)
+                print(f"Loaded {len(backbone_weights)} weights.")
+                if missing:
+                    print(f"Missing in model: {len(missing)}, Missing keys: {missing}")
+                if unexpected:
+                    print(f"Unexpected in checkpoint: {len(unexpected)}, Unexpected keys: {unexpected}")
+            base_model = self.rkan_components.densenet
+
             self.stage1_kan = self._make_densenet_kan_layer(base_model.features.denseblock1, base_model.features.transition1, 0)
             self.stage2_kan = self._make_densenet_kan_layer(base_model.features.denseblock2, base_model.features.transition2, 1)
             self.stage3_kan = self._make_densenet_kan_layer(base_model.features.denseblock3, base_model.features.transition3, 2)
@@ -135,7 +138,7 @@ class RKAN_RCNN(nn.Module):
     def _make_resnet_kan_layer(self, layer, layer_idx):
         rkan = self.rkan_components
         
-        class ResNetKANLayer(nn.Module):
+        class ResNetRKANLayer(nn.Module):
             def __init__(self, base_layer, idx):
                 super().__init__()
                 self.base_layer = base_layer
@@ -150,10 +153,8 @@ class RKAN_RCNN(nn.Module):
                     
                     residual = rkan.conv_reduce[self.idx](identity)
                     residual = rkan.silu(residual)
-
                     residual = rkan.kan_conv1[self.idx](residual)
                     residual = rkan.kan_bn[self.idx](residual)
-
                     residual = rkan.conv_expand[self.idx](residual)
                     residual = rkan.silu(residual)
                     
@@ -161,19 +162,19 @@ class RKAN_RCNN(nn.Module):
                         residual = rkan.kan_conv2[self.idx](residual)
                     residual = rkan.kan_expand_bn[self.idx](residual)
                     
-                    if rkan.shortcut:
+                    if hasattr(rkan, "shortcut") and rkan.shortcut:
                         shortcut = rkan.conv_shortcut[self.idx](identity)
                         shortcut = rkan.shortcut_bn[self.idx](shortcut)
                         residual = residual + shortcut
                     out = rkan.apply_mechanism(out, residual, self.idx, mechanism)
                 return out
             
-        return ResNetKANLayer(layer, layer_idx)
+        return ResNetRKANLayer(layer, layer_idx)
     
     def _make_densenet_kan_layer(self, denseblock, post_transition, layer_idx):
         rkan = self.rkan_components
         
-        class DenseNetKANLayer(nn.Module):
+        class DenseNetRKANLayer(nn.Module):
             def __init__(self, dense_block, post_transition, idx):
                 super().__init__()
                 self.dense_block = dense_block
@@ -192,10 +193,8 @@ class RKAN_RCNN(nn.Module):
                     
                     residual = rkan.conv_reduce[self.idx](identity)
                     residual = rkan.silu(residual)
-                    
                     residual = rkan.kan_conv1[self.idx](residual)
                     residual = rkan.kan_bn[self.idx](residual)
-                    
                     residual = rkan.conv_expand[self.idx](residual)
                     residual = rkan.silu(residual)
                     
@@ -205,7 +204,7 @@ class RKAN_RCNN(nn.Module):
                     out = rkan.apply_mechanism(out, residual, self.idx, mechanism)
                 return out
             
-        return DenseNetKANLayer(denseblock, post_transition, layer_idx)
+        return DenseNetRKANLayer(denseblock, post_transition, layer_idx)
         
     def forward(self, images, targets = None):
         return self.model(images, targets)

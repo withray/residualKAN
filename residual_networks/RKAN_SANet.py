@@ -4,32 +4,49 @@ import torchvision.models as models
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from torchvision.models.resnet import BasicBlock, Bottleneck
 
-class SqueezeExcitation(nn.Module):
-    def __init__(self, channels):
-        super(SqueezeExcitation, self).__init__()
-        reduction = 16
+class ShuffleAttention(nn.Module):
+    def __init__(self, channels, groups = 64):
+        super(ShuffleAttention, self).__init__()
+        self.groups = groups
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc1 = nn.Conv2d(channels, channels // reduction, kernel_size = 1, bias = False)
-        self.relu = nn.ReLU(inplace = True)
-        self.fc2 = nn.Conv2d(channels // reduction, channels, kernel_size = 1, bias = False)
+        self.cweight = nn.Parameter(torch.zeros(1, channels // (2 * groups), 1, 1))
+        self.cbias = nn.Parameter(torch.ones(1, channels // (2 * groups), 1, 1))
+        self.sweight = nn.Parameter(torch.zeros(1, channels // (2 * groups), 1, 1))
+        self.sbias = nn.Parameter(torch.ones(1, channels // (2 * groups), 1, 1))
         self.sigmoid = nn.Sigmoid()
-
+        self.gn = nn.GroupNorm(channels // (2 * groups), channels // (2 * groups))
+    
+    @staticmethod
+    def channel_shuffle(x, groups):
+        b, c, h, w = x.shape
+        x = x.reshape(b, groups, -1, h, w)
+        x = x.permute(0, 2, 1, 3, 4)
+        x = x.reshape(b, -1, h, w)
+        return x
+    
     def forward(self, x):
-        y = self.avg_pool(x)
-        y = self.fc1(y)
-        y = self.relu(y)
-        y = self.fc2(y)
-        y = self.sigmoid(y)
-        return x * y
-
-class SEBasicBlock(BasicBlock):
+        b, c, h, w = x.size()
+        x = x.reshape(b * self.groups, -1, h, w)
+        x_0, x_1 = x.chunk(2, dim=1)
+        
+        xn = self.avg_pool(x_0)
+        xn = self.cweight * xn + self.cbias
+        xn = x_0 * self.sigmoid(xn)
+        
+        xs = self.gn(x_1)
+        xs = self.sweight * xs + self.sbias
+        xs = x_1 * self.sigmoid(xs)
+        
+        out = torch.cat([xn, xs], dim = 1)
+        out = out.reshape(b, -1, h, w)
+        out = self.channel_shuffle(out, 2)
+        return out
+    
+class SABasicBlock(BasicBlock):
     def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None):
-        super(SEBasicBlock, self).__init__(
-            inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
-            groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
-        )
-        self.se = SqueezeExcitation(planes)
-
+        super(SABasicBlock, self).__init__(inplanes, planes, stride, downsample, groups, base_width, dilation, norm_layer)
+        self.sa = ShuffleAttention(planes)
+    
     def forward(self, x):
         identity = x
         out = self.conv1(x)
@@ -37,21 +54,18 @@ class SEBasicBlock(BasicBlock):
         out = self.relu(out)
         out = self.conv2(out)
         out = self.bn2(out)
-        out = self.se(out)
+        out = self.sa(out)
         if self.downsample is not None:
             identity = self.downsample(x)
         out += identity
         out = self.relu(out)
         return out
 
-class SEBottleneck(Bottleneck):
+class SABottleneck(Bottleneck):
     def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None):
-        super(SEBottleneck, self).__init__(
-            inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
-            groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
-        )
-        self.se = SqueezeExcitation(planes * self.expansion)
-
+        super(SABottleneck, self).__init__(inplanes, planes, stride, downsample, groups, base_width, dilation, norm_layer)
+        self.sa = ShuffleAttention(planes * self.expansion)
+    
     def forward(self, x):
         identity = x
         out = self.conv1(x)
@@ -62,18 +76,18 @@ class SEBottleneck(Bottleneck):
         out = self.relu(out)
         out = self.conv3(out)
         out = self.bn3(out)
-        out = self.se(out)
+        out = self.sa(out)
         if self.downsample is not None:
             identity = self.downsample(x)
         out += identity
         out = self.relu(out)
         return out
 
-class RKAN_SENet(nn.Module):
-    def __init__(self, num_classes = 1000, version = "senet50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
+class RKAN_SANet(nn.Module):
+    def __init__(self, num_classes = 1000, version = "sanet50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
                  mechanisms = [None, None, None, "addition"], spline_order = (3, 2), grid_size = (3, 2), inv_bottleneck = False, inv_factor = 4, shortcut = False):
-        super(RKAN_SENet, self).__init__()
-
+        super(RKAN_SANet, self).__init__()
+        
         self.mechanisms = mechanisms
         self.reduce_factor = reduce_factor
         self.inv_bottleneck = inv_bottleneck
@@ -83,7 +97,7 @@ class RKAN_SENet(nn.Module):
         if len(self.mechanisms) != 4:
             raise ValueError(f"Length of mechanisms ({len(self.mechanisms)}) must match the number of stages (4).")
         
-        version_mapping = {f"senet{i}": f"resnet{i}" for i in [18, 34, 50, 101, 152]}
+        version_mapping = {f"sanet{i}": f"resnet{i}" for i in [18, 34, 50, 101, 152]}
         backbone_version = version_mapping.get(version, version)
 
         if pretrained:
@@ -92,11 +106,11 @@ class RKAN_SENet(nn.Module):
             self.resnet = getattr(models, backbone_version)(weights = None)
 
         block_map = {
-            "resnet18": (SEBasicBlock, [2, 2, 2, 2]),
-            "resnet34": (SEBasicBlock, [3, 4, 6, 3]),
-            "resnet50": (SEBottleneck, [3, 4, 6, 3]),
-            "resnet101": (SEBottleneck, [3, 4, 23, 3]),
-            "resnet152": (SEBottleneck, [3, 8, 36, 3])
+            "resnet18": (SABasicBlock, [2, 2, 2, 2]),
+            "resnet34": (SABasicBlock, [3, 4, 6, 3]),
+            "resnet50": (SABottleneck, [3, 4, 6, 3]),
+            "resnet101": (SABottleneck, [3, 4, 23, 3]),
+            "resnet152": (SABottleneck, [3, 8, 36, 3])
         }
 
         if backbone_version not in block_map:

@@ -4,32 +4,28 @@ import torchvision.models as models
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from torchvision.models.resnet import BasicBlock, Bottleneck
 
-class SqueezeExcitation(nn.Module):
-    def __init__(self, channels):
-        super(SqueezeExcitation, self).__init__()
-        reduction = 16
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc1 = nn.Conv2d(channels, channels // reduction, kernel_size = 1, bias = False)
-        self.relu = nn.ReLU(inplace = True)
-        self.fc2 = nn.Conv2d(channels // reduction, channels, kernel_size = 1, bias = False)
+class EfficientLocalAttention(nn.Module):
+    def __init__(self, channels, kernel_size = 7):
+        super(EfficientLocalAttention, self).__init__()
+        
+        padding = kernel_size // 2
+        self.conv = nn.Conv1d(channels, channels, kernel_size = kernel_size, padding = padding, groups = channels // 8, bias = False)
+        self.gn = nn.GroupNorm(16, channels)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        y = self.avg_pool(x)
-        y = self.fc1(y)
-        y = self.relu(y)
-        y = self.fc2(y)
-        y = self.sigmoid(y)
-        return x * y
+        b, c, h, w = x.size()
+        x_h = torch.mean(x, dim = 3, keepdim = True).view(b, c, h)
+        x_w = torch.mean(x, dim = 2, keepdim = True).view(b, c, w)
+        x_h = self.sigmoid(self.gn(self.conv(x_h))).view(b, c, h, 1)
+        x_w = self.sigmoid(self.gn(self.conv(x_w))).view(b, c, 1, w)
+        return x * x_h * x_w
 
-class SEBasicBlock(BasicBlock):
+class ELABasicBlock(BasicBlock):
     def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None):
-        super(SEBasicBlock, self).__init__(
-            inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
-            groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
-        )
-        self.se = SqueezeExcitation(planes)
-
+        super(ELABasicBlock, self).__init__(inplanes, planes, stride, downsample, groups, base_width, dilation, norm_layer)
+        self.ela = EfficientLocalAttention(planes)
+    
     def forward(self, x):
         identity = x
         out = self.conv1(x)
@@ -37,21 +33,18 @@ class SEBasicBlock(BasicBlock):
         out = self.relu(out)
         out = self.conv2(out)
         out = self.bn2(out)
-        out = self.se(out)
+        out = self.ela(out)
         if self.downsample is not None:
             identity = self.downsample(x)
         out += identity
         out = self.relu(out)
         return out
 
-class SEBottleneck(Bottleneck):
+class ELABottleneck(Bottleneck):
     def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None):
-        super(SEBottleneck, self).__init__(
-            inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
-            groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
-        )
-        self.se = SqueezeExcitation(planes * self.expansion)
-
+        super(ELABottleneck, self).__init__(inplanes, planes, stride, downsample, groups, base_width, dilation, norm_layer)
+        self.ela = EfficientLocalAttention(planes * self.expansion)
+    
     def forward(self, x):
         identity = x
         out = self.conv1(x)
@@ -62,18 +55,18 @@ class SEBottleneck(Bottleneck):
         out = self.relu(out)
         out = self.conv3(out)
         out = self.bn3(out)
-        out = self.se(out)
+        out = self.ela(out)
         if self.downsample is not None:
             identity = self.downsample(x)
         out += identity
         out = self.relu(out)
         return out
 
-class RKAN_SENet(nn.Module):
-    def __init__(self, num_classes = 1000, version = "senet50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
+class RKAN_ELA(nn.Module):
+    def __init__(self, num_classes = 1000, version = "ela50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
                  mechanisms = [None, None, None, "addition"], spline_order = (3, 2), grid_size = (3, 2), inv_bottleneck = False, inv_factor = 4, shortcut = False):
-        super(RKAN_SENet, self).__init__()
-
+        super(RKAN_ELA, self).__init__()
+        
         self.mechanisms = mechanisms
         self.reduce_factor = reduce_factor
         self.inv_bottleneck = inv_bottleneck
@@ -83,7 +76,7 @@ class RKAN_SENet(nn.Module):
         if len(self.mechanisms) != 4:
             raise ValueError(f"Length of mechanisms ({len(self.mechanisms)}) must match the number of stages (4).")
         
-        version_mapping = {f"senet{i}": f"resnet{i}" for i in [18, 34, 50, 101, 152]}
+        version_mapping = {f"ela{i}": f"resnet{i}" for i in [18, 34, 50, 101, 152]}
         backbone_version = version_mapping.get(version, version)
 
         if pretrained:
@@ -92,11 +85,11 @@ class RKAN_SENet(nn.Module):
             self.resnet = getattr(models, backbone_version)(weights = None)
 
         block_map = {
-            "resnet18": (SEBasicBlock, [2, 2, 2, 2]),
-            "resnet34": (SEBasicBlock, [3, 4, 6, 3]),
-            "resnet50": (SEBottleneck, [3, 4, 6, 3]),
-            "resnet101": (SEBottleneck, [3, 4, 23, 3]),
-            "resnet152": (SEBottleneck, [3, 8, 36, 3])
+            "resnet18": (ELABasicBlock, [2, 2, 2, 2]),
+            "resnet34": (ELABasicBlock, [3, 4, 6, 3]),
+            "resnet50": (ELABottleneck, [3, 4, 6, 3]),
+            "resnet101": (ELABottleneck, [3, 4, 23, 3]),
+            "resnet152": (ELABottleneck, [3, 8, 36, 3])
         }
 
         if backbone_version not in block_map:

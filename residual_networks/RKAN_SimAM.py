@@ -4,32 +4,24 @@ import torchvision.models as models
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from torchvision.models.resnet import BasicBlock, Bottleneck
 
-class SqueezeExcitation(nn.Module):
-    def __init__(self, channels):
-        super(SqueezeExcitation, self).__init__()
-        reduction = 16
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc1 = nn.Conv2d(channels, channels // reduction, kernel_size = 1, bias = False)
-        self.relu = nn.ReLU(inplace = True)
-        self.fc2 = nn.Conv2d(channels // reduction, channels, kernel_size = 1, bias = False)
-        self.sigmoid = nn.Sigmoid()
-
+class SimAM(nn.Module):
+    def __init__(self, channels = None, e_lambda = 1e-4):
+        super(SimAM, self).__init__()
+        self.activation = nn.Sigmoid()
+        self.e_lambda = e_lambda
+    
     def forward(self, x):
-        y = self.avg_pool(x)
-        y = self.fc1(y)
-        y = self.relu(y)
-        y = self.fc2(y)
-        y = self.sigmoid(y)
-        return x * y
+        b, c, h, w = x.size()
+        n = w * h - 1
+        x_minus_mu_square = (x - x.mean(dim = [2, 3], keepdim = True)).pow(2)
+        y = x_minus_mu_square / (4 * (x_minus_mu_square.sum(dim = [2, 3], keepdim = True) / n + self.e_lambda)) + 0.5
+        return x * self.activation(y)
 
-class SEBasicBlock(BasicBlock):
-    def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None):
-        super(SEBasicBlock, self).__init__(
-            inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
-            groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
-        )
-        self.se = SqueezeExcitation(planes)
-
+class SimAMBasicBlock(BasicBlock):
+    def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None, e_lambda = 1e-4):
+        super(SimAMBasicBlock, self).__init__(inplanes, planes, stride, downsample, groups, base_width, dilation, norm_layer)
+        self.simam = SimAM(channels = planes, e_lambda = e_lambda)
+    
     def forward(self, x):
         identity = x
         out = self.conv1(x)
@@ -37,21 +29,18 @@ class SEBasicBlock(BasicBlock):
         out = self.relu(out)
         out = self.conv2(out)
         out = self.bn2(out)
-        out = self.se(out)
+        out = self.simam(out)
         if self.downsample is not None:
             identity = self.downsample(x)
         out += identity
         out = self.relu(out)
         return out
 
-class SEBottleneck(Bottleneck):
-    def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None):
-        super(SEBottleneck, self).__init__(
-            inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
-            groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
-        )
-        self.se = SqueezeExcitation(planes * self.expansion)
-
+class SimAMBottleneck(Bottleneck):
+    def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None, e_lambda = 1e-4):
+        super(SimAMBottleneck, self).__init__(inplanes, planes, stride, downsample, groups, base_width, dilation, norm_layer)
+        self.simam = SimAM(channels = planes * self.expansion, e_lambda = e_lambda)
+    
     def forward(self, x):
         identity = x
         out = self.conv1(x)
@@ -62,28 +51,29 @@ class SEBottleneck(Bottleneck):
         out = self.relu(out)
         out = self.conv3(out)
         out = self.bn3(out)
-        out = self.se(out)
+        out = self.simam(out)
         if self.downsample is not None:
             identity = self.downsample(x)
         out += identity
         out = self.relu(out)
         return out
 
-class RKAN_SENet(nn.Module):
-    def __init__(self, num_classes = 1000, version = "senet50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
-                 mechanisms = [None, None, None, "addition"], spline_order = (3, 2), grid_size = (3, 2), inv_bottleneck = False, inv_factor = 4, shortcut = False):
-        super(RKAN_SENet, self).__init__()
-
+class RKAN_SimAM(nn.Module):
+    def __init__(self, num_classes = 1000, version = "simam50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
+                 mechanisms = [None, None, None, "addition"], spline_order = (3, 2), grid_size = (3, 2), inv_bottleneck = False, inv_factor = 4, shortcut = False, e_lambda = 1e-4):
+        super(RKAN_SimAM, self).__init__()
+        
         self.mechanisms = mechanisms
         self.reduce_factor = reduce_factor
         self.inv_bottleneck = inv_bottleneck
         self.inv_factor = inv_factor
         self.shortcut = shortcut
+        self.e_lambda = e_lambda
 
         if len(self.mechanisms) != 4:
             raise ValueError(f"Length of mechanisms ({len(self.mechanisms)}) must match the number of stages (4).")
         
-        version_mapping = {f"senet{i}": f"resnet{i}" for i in [18, 34, 50, 101, 152]}
+        version_mapping = {f"simam{i}": f"resnet{i}" for i in [18, 34, 50, 101, 152]}
         backbone_version = version_mapping.get(version, version)
 
         if pretrained:
@@ -92,11 +82,11 @@ class RKAN_SENet(nn.Module):
             self.resnet = getattr(models, backbone_version)(weights = None)
 
         block_map = {
-            "resnet18": (SEBasicBlock, [2, 2, 2, 2]),
-            "resnet34": (SEBasicBlock, [3, 4, 6, 3]),
-            "resnet50": (SEBottleneck, [3, 4, 6, 3]),
-            "resnet101": (SEBottleneck, [3, 4, 23, 3]),
-            "resnet152": (SEBottleneck, [3, 8, 36, 3])
+            "resnet18": (SimAMBasicBlock, [2, 2, 2, 2]),
+            "resnet34": (SimAMBasicBlock, [3, 4, 6, 3]),
+            "resnet50": (SimAMBottleneck, [3, 4, 6, 3]),
+            "resnet101": (SimAMBottleneck, [3, 4, 23, 3]),
+            "resnet152": (SimAMBottleneck, [3, 8, 36, 3])
         }
 
         if backbone_version not in block_map:
@@ -194,7 +184,7 @@ class RKAN_SENet(nn.Module):
             nn.Conv2d(channels // reduction, channels, 1, bias = False),
             nn.Sigmoid()
         )
-
+    
     def _replace_blocks(self, layer, block):
         new_blocks = []
         for module in layer:
@@ -210,7 +200,7 @@ class RKAN_SENet(nn.Module):
                 
                 new_block = block(
                     inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
-                    groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
+                    groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer, e_lambda = self.e_lambda
                 )
                 new_blocks.append(new_block)
             else:

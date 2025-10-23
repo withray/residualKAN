@@ -5,11 +5,13 @@ from KAN_Conv.KANConv import KAN_Convolutional_Layer
 
 class RKAN_RegNet(nn.Module):
     def __init__(self, num_classes = 1000, version = "regnet_y_3_2gf", kan_type = "chebyshev", pretrained = False, reduce_factor = [2, 2, 2, 2], n_convs = 1,
-                 mechanisms = [None, None, None, "addition"]):
+                 mechanisms = [None, None, None, "addition"], spline_order = (3, 2), grid_size = (3, 2), inv_bottleneck = False, inv_factor = 4):
         super(RKAN_RegNet, self).__init__()
 
         self.mechanisms = mechanisms
         self.reduce_factor = reduce_factor
+        self.inv_bottleneck = inv_bottleneck
+        self.inv_factor = inv_factor
 
         if pretrained:
             self.regnet = getattr(models, version)(weights = "DEFAULT")
@@ -35,32 +37,52 @@ class RKAN_RegNet(nn.Module):
 
         # KAN convolutions for each stage
         self.kan_conv1 = nn.ModuleList([
-            KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (2, 2), padding = (1, 1), kan_type = kan_type, spline_order = 3)
+            KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (2, 2), padding = (1, 1),
+                                    kan_type = kan_type, spline_order = spline_order[0], grid_size = grid_size[0])
             for i in range(len(channels))
         ])
 
         self.kan_conv2 = nn.ModuleList([
-            KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (1, 1), padding = (1, 1), kan_type = kan_type, spline_order = 2)
+            KAN_Convolutional_Layer(n_convs = n_convs, kernel_size = (3, 3), stride = (1, 1), padding = (1, 1),
+                                    kan_type = kan_type, spline_order = spline_order[1], grid_size = grid_size[1])
             for i in range(len(channels))
         ])
 
         # Bottleneck for KAN
-        self.conv_reduce = nn.ModuleList([
-            nn.Conv2d(32, 32 // reduce_factor[0], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d(channels[0], channels[0] // reduce_factor[1], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d(channels[1], channels[1] // reduce_factor[2], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d(channels[2], channels[2] // reduce_factor[3], kernel_size = 1, stride = 1, bias = False)
-        ])
+        if inv_bottleneck:
+            self.conv_reduce = nn.ModuleList([
+                nn.Conv2d(32, 32 * self.inv_factor, kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d(channels[0], channels[0] * self.inv_factor, kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d(channels[1], channels[1] * self.inv_factor, kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d(channels[2], channels[2] * self.inv_factor, kernel_size = 1, stride = 1, bias = False)
+            ])
 
-        self.conv_expand = nn.ModuleList([
-            nn.Conv2d(32 // reduce_factor[0], channels[0], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d(channels[0] // reduce_factor[1], channels[1], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d(channels[1] // reduce_factor[2], channels[2], kernel_size = 1, stride = 1, bias = False),
-            nn.Conv2d(channels[2] // reduce_factor[3], channels[3], kernel_size = 1, stride = 1, bias = False)
-        ])
+            self.conv_expand = nn.ModuleList([
+                nn.Conv2d((32 * self.inv_factor) * n_convs, channels[0], kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d((channels[0] * self.inv_factor) * n_convs, channels[1], kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d((channels[1] * self.inv_factor) * n_convs, channels[2], kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d((channels[2] * self.inv_factor) * n_convs, channels[3], kernel_size = 1, stride = 1, bias = False)
+            ])
+        else:
+            self.conv_reduce = nn.ModuleList([
+                nn.Conv2d(32, 32 // reduce_factor[0], kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d(channels[0], channels[0] // reduce_factor[1], kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d(channels[1], channels[1] // reduce_factor[2], kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d(channels[2], channels[2] // reduce_factor[3], kernel_size = 1, stride = 1, bias = False)
+            ])
+
+            self.conv_expand = nn.ModuleList([
+                nn.Conv2d((32 // reduce_factor[0]) * n_convs, channels[0], kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d((channels[0] // reduce_factor[1]) * n_convs, channels[1], kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d((channels[1] // reduce_factor[2]) * n_convs, channels[2], kernel_size = 1, stride = 1, bias = False),
+                nn.Conv2d((channels[2] // reduce_factor[3]) * n_convs, channels[3], kernel_size = 1, stride = 1, bias = False)
+            ])
 
         # KAN normalization
-        self.kan_bn = nn.ModuleList([nn.BatchNorm2d(ch // reduce_factor[i]) for i, ch in enumerate([32] + channels[:-1])])
+        if self.inv_bottleneck:
+            self.kan_bn = nn.ModuleList([nn.BatchNorm2d(ch * self.inv_factor) for i, ch in enumerate([32] + channels[:-1])])
+        else:
+            self.kan_bn = nn.ModuleList([nn.BatchNorm2d(ch // reduce_factor[i]) for i, ch in enumerate([32] + channels[:-1])])
         self.kan_expand_bn = nn.ModuleList([nn.BatchNorm2d(ch) for ch in channels])
 
         # Activations
@@ -99,10 +121,8 @@ class RKAN_RegNet(nn.Module):
             if mechanism is not None:
                 residual = self.conv_reduce[i](identity)
                 residual = self.silu(residual)
-                
                 residual = self.kan_conv1[i](residual)
                 residual = self.kan_bn[i](residual)
-                    
                 residual = self.conv_expand[i](residual)
                 residual = self.silu(residual)
                 

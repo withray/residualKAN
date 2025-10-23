@@ -4,31 +4,37 @@ import torchvision.models as models
 from KAN_Conv.KANConv import KAN_Convolutional_Layer
 from torchvision.models.resnet import BasicBlock, Bottleneck
 
-class SqueezeExcitation(nn.Module):
-    def __init__(self, channels):
-        super(SqueezeExcitation, self).__init__()
-        reduction = 16
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc1 = nn.Conv2d(channels, channels // reduction, kernel_size = 1, bias = False)
-        self.relu = nn.ReLU(inplace = True)
-        self.fc2 = nn.Conv2d(channels // reduction, channels, kernel_size = 1, bias = False)
-        self.sigmoid = nn.Sigmoid()
+class GlobalContextBlock(nn.Module):
+    def __init__(self, channels, reduction = 4):
+        super(GlobalContextBlock, self).__init__()
+        self.channels = channels
+        self.context_modeling = nn.Conv2d(channels, 1, kernel_size = 1, bias = False)
+        self.softmax = nn.Softmax(dim = 2)
 
-    def forward(self, x):
-        y = self.avg_pool(x)
-        y = self.fc1(y)
-        y = self.relu(y)
-        y = self.fc2(y)
-        y = self.sigmoid(y)
-        return x * y
-
-class SEBasicBlock(BasicBlock):
-    def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None):
-        super(SEBasicBlock, self).__init__(
-            inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
-            groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
+        self.transform = nn.Sequential(
+            nn.Conv2d(channels, channels // reduction, kernel_size = 1, bias = False),
+            nn.LayerNorm([channels // reduction, 1, 1]),
+            nn.ReLU(inplace = True),
+            nn.Conv2d(channels // reduction, channels, kernel_size = 1, bias = False)
         )
-        self.se = SqueezeExcitation(planes)
+        
+    def forward(self, x):
+        batch, channels, height, width = x.size()
+        input_x = x
+        context_mask = self.context_modeling(x)
+        context_mask = context_mask.view(batch, 1, height * width)
+        context_mask = self.softmax(context_mask)
+
+        context = torch.matmul(input_x.view(batch, channels, height * width), context_mask.transpose(1, 2))
+        context = context.unsqueeze(-1)
+        transform_out = self.transform(context)
+        out = x + transform_out
+        return out
+
+class GCBasicBlock(BasicBlock):
+    def __init__(self, inplanes, planes, stride = 1, downsample = None, **kwargs):
+        super(GCBasicBlock, self).__init__(inplanes, planes, stride, downsample, **kwargs)
+        self.gc_block = GlobalContextBlock(planes)
 
     def forward(self, x):
         identity = x
@@ -37,20 +43,17 @@ class SEBasicBlock(BasicBlock):
         out = self.relu(out)
         out = self.conv2(out)
         out = self.bn2(out)
-        out = self.se(out)
+        out = self.gc_block(out)
         if self.downsample is not None:
             identity = self.downsample(x)
         out += identity
         out = self.relu(out)
         return out
 
-class SEBottleneck(Bottleneck):
-    def __init__(self, inplanes, planes, stride = 1, downsample = None, groups = 1, base_width = 64, dilation = 1, norm_layer = None):
-        super(SEBottleneck, self).__init__(
-            inplanes = inplanes, planes = planes, stride = stride, downsample = downsample,
-            groups = groups, base_width = base_width, dilation = dilation, norm_layer = norm_layer
-        )
-        self.se = SqueezeExcitation(planes * self.expansion)
+class GCBottleneck(Bottleneck):
+    def __init__(self, inplanes, planes, stride = 1, downsample = None, **kwargs):
+        super(GCBottleneck, self).__init__(inplanes, planes, stride, downsample, **kwargs)
+        self.gc_block = GlobalContextBlock(planes * self.expansion)
 
     def forward(self, x):
         identity = x
@@ -62,17 +65,17 @@ class SEBottleneck(Bottleneck):
         out = self.relu(out)
         out = self.conv3(out)
         out = self.bn3(out)
-        out = self.se(out)
+        out = self.gc_block(out)
         if self.downsample is not None:
             identity = self.downsample(x)
         out += identity
         out = self.relu(out)
         return out
-
-class RKAN_SENet(nn.Module):
-    def __init__(self, num_classes = 1000, version = "senet50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
+    
+class RKAN_GCNet(nn.Module):
+    def __init__(self, num_classes = 1000, version = "gcnet50", kan_type = "chebyshev", pretrained = False, n_convs = 1, reduce_factor = [2, 2, 2, 2],
                  mechanisms = [None, None, None, "addition"], spline_order = (3, 2), grid_size = (3, 2), inv_bottleneck = False, inv_factor = 4, shortcut = False):
-        super(RKAN_SENet, self).__init__()
+        super(RKAN_GCNet, self).__init__()
 
         self.mechanisms = mechanisms
         self.reduce_factor = reduce_factor
@@ -83,7 +86,7 @@ class RKAN_SENet(nn.Module):
         if len(self.mechanisms) != 4:
             raise ValueError(f"Length of mechanisms ({len(self.mechanisms)}) must match the number of stages (4).")
         
-        version_mapping = {f"senet{i}": f"resnet{i}" for i in [18, 34, 50, 101, 152]}
+        version_mapping = {f"gcnet{i}": f"resnet{i}" for i in [18, 34, 50, 101, 152]}
         backbone_version = version_mapping.get(version, version)
 
         if pretrained:
@@ -92,18 +95,17 @@ class RKAN_SENet(nn.Module):
             self.resnet = getattr(models, backbone_version)(weights = None)
 
         block_map = {
-            "resnet18": (SEBasicBlock, [2, 2, 2, 2]),
-            "resnet34": (SEBasicBlock, [3, 4, 6, 3]),
-            "resnet50": (SEBottleneck, [3, 4, 6, 3]),
-            "resnet101": (SEBottleneck, [3, 4, 23, 3]),
-            "resnet152": (SEBottleneck, [3, 8, 36, 3])
+            "resnet18": (GCBasicBlock, [2, 2, 2, 2]),
+            "resnet34": (GCBasicBlock, [3, 4, 6, 3]),
+            "resnet50": (GCBottleneck, [3, 4, 6, 3]),
+            "resnet101": (GCBottleneck, [3, 4, 23, 3]),
+            "resnet152": (GCBottleneck, [3, 8, 36, 3])
         }
 
         if backbone_version not in block_map:
             raise ValueError(f"Unsupported version: {backbone_version}. Supported: {list(block_map.keys())}.")
                 
         block, layers = block_map[backbone_version]
-        self.resnet.layer1 = self._replace_blocks(self.resnet.layer1, block)
         self.resnet.layer2 = self._replace_blocks(self.resnet.layer2, block)
         self.resnet.layer3 = self._replace_blocks(self.resnet.layer3, block)
         self.resnet.layer4 = self._replace_blocks(self.resnet.layer4, block)
