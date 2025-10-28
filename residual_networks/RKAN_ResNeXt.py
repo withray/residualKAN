@@ -24,7 +24,8 @@ class RKANeXt(nn.Module):
         self.resnext.fc = nn.Linear(self.resnext.fc.in_features, num_classes)
         layer_config = {
             "resnext50_32x4d": [256, 512, 1024, 2048],
-            "resnext101_32x8d": [256, 512, 1024, 2048]
+            "resnext101_32x8d": [256, 512, 1024, 2048],
+            "resnext101_64x4d": [256, 512, 1024, 2048]
         }
         channels = layer_config[version]
 
